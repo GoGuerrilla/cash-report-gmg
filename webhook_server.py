@@ -861,10 +861,10 @@ def _send_rejection_email(to_addr: str, client_name: str, reason: str):
 # ══════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    port = int(os.environ.get("WEBHOOK_PORT", 5000))
-    log.info("Starting C.A.S.H. Webhook Listener on http://localhost:%d", port)
+    port = int(os.environ.get("PORT", 5000))
+    log.info("Starting C.A.S.H. Webhook Listener on http://0.0.0.0:%d", port)
     log.info("  POST /webhook  — Typeform webhook target")
     log.info("  GET  /health   — health check")
     wh_secret = os.environ.get("TYPEFORM_WEBHOOK_SECRET", "")
     log.info("  Signature verification: %s", "ON" if wh_secret else "OFF (set TYPEFORM_WEBHOOK_SECRET)")
-    app.run(host="127.0.0.1", port=port, debug=False, threaded=True)
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
