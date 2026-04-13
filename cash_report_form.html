@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>C.A.S.H. Report — Intake Form | GMG</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --blue:      #00AEEF;
+      --blue-dim:  rgba(0, 174, 239, 0.15);
+      --blue-glow: rgba(0, 174, 239, 0.35);
+      --bg:        #0A0A0A;
+      --card:      rgba(255, 255, 255, 0.04);
+      --border:    rgba(0, 174, 239, 0.25);
+      --input-bg:  rgba(255, 255, 255, 0.05);
+      --input-border: rgba(255, 255, 255, 0.12);
+      --text:      #FFFFFF;
+      --muted:     #94A3B8;
+      --label:     #CBD5E1;
+      --error:     #FF4444;
+      --radius:    10px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 48px 16px 80px;
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    /* Ambient background glow */
+    body::before {
+      content: "";
+      position: fixed;
+      top: -20%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 800px;
+      height: 500px;
+      background: radial-gradient(ellipse, rgba(0, 174, 239, 0.08) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Header ──────────────────────────────────────── */
+    .header {
+      text-align: center;
+      margin-bottom: 36px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .logo {
+      width: 96px;
+      height: 96px;
+      object-fit: contain;
+      margin-bottom: 20px;
+      filter: drop-shadow(0 0 18px rgba(0, 174, 239, 0.45));
+    }
+
+    .headline {
+      font-size: clamp(22px, 4vw, 32px);
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: var(--blue);
+      line-height: 1.2;
+      margin-bottom: 10px;
+    }
+
+    .subheadline {
+      font-size: clamp(13px, 2vw, 15px);
+      color: var(--muted);
+      max-width: 460px;
+      margin: 0 auto;
+      line-height: 1.6;
+    }
+
+    /* ── Card ────────────────────────────────────────── */
+    .card {
+      width: 100%;
+      max-width: 620px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 40px 40px 44px;
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      box-shadow:
+        0 0 0 1px rgba(0, 174, 239, 0.08),
+        0 8px 40px rgba(0, 0, 0, 0.6),
+        0 0 60px rgba(0, 174, 239, 0.06);
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Top accent bar */
+    .card::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 10%; right: 10%;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--blue), transparent);
+      border-radius: 100%;
+    }
+
+    /* ── Section divider ──────────────────────────────── */
+    .section-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.8px;
+      text-transform: uppercase;
+      color: var(--blue);
+      margin: 28px 0 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .section-label::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    .section-label:first-of-type { margin-top: 0; }
+
+    /* ── Form grid ───────────────────────────────────── */
+    .form-row {
+      display: grid;
+      gap: 16px;
+    }
+
+    .form-row.two-col { grid-template-columns: 1fr 1fr; }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    label {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.4px;
+      color: var(--label);
+    }
+
+    label .req {
+      color: var(--blue);
+      margin-left: 2px;
+    }
+
+    input[type="text"],
+    input[type="email"],
+    input[type="tel"],
+    input[type="number"],
+    input[type="url"],
+    select,
+    textarea {
+      width: 100%;
+      background: var(--input-bg);
+      border: 1px solid var(--input-border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: inherit;
+      font-size: 14px;
+      padding: 11px 14px;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    input::placeholder,
+    textarea::placeholder {
+      color: rgba(148, 163, 184, 0.5);
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      border-color: var(--blue);
+      background: rgba(0, 174, 239, 0.06);
+      box-shadow: 0 0 0 3px var(--blue-dim), 0 0 14px rgba(0, 174, 239, 0.12);
+    }
+
+    input:hover:not(:focus),
+    select:hover:not(:focus),
+    textarea:hover:not(:focus) {
+      border-color: rgba(0, 174, 239, 0.4);
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 90px;
+      line-height: 1.5;
+    }
+
+    select {
+      cursor: pointer;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2300AEEF' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 14px center;
+      padding-right: 38px;
+    }
+
+    select option {
+      background: #111827;
+      color: var(--text);
+    }
+
+    /* ── Hint text ────────────────────────────────────── */
+    .hint {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 2px;
+      line-height: 1.4;
+    }
+
+    /* ── Consent row ─────────────────────────────────── */
+    .consent-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      margin-top: 6px;
+    }
+
+    .consent-row input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      min-width: 18px;
+      margin-top: 1px;
+      padding: 0;
+      border: 1px solid var(--input-border);
+      border-radius: 4px;
+      background: var(--input-bg);
+      cursor: pointer;
+      position: relative;
+      -webkit-appearance: none;
+      appearance: none;
+      transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .consent-row input[type="checkbox"]:checked {
+      background: var(--blue);
+      border-color: var(--blue);
+    }
+
+    .consent-row input[type="checkbox"]:checked::after {
+      content: "";
+      position: absolute;
+      top: 2px; left: 5px;
+      width: 5px; height: 9px;
+      border: 2px solid #0A0A0A;
+      border-top: none;
+      border-left: none;
+      transform: rotate(45deg);
+    }
+
+    .consent-row input[type="checkbox"]:focus {
+      box-shadow: 0 0 0 3px var(--blue-dim);
+    }
+
+    .consent-label {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.5;
+      cursor: pointer;
+    }
+
+    /* ── Submit ──────────────────────────────────────── */
+    .submit-wrap {
+      margin-top: 32px;
+    }
+
+    .btn-submit {
+      width: 100%;
+      padding: 15px 24px;
+      background: var(--blue);
+      color: #0A0A0A;
+      font-family: inherit;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      border: none;
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: background 0.2s, box-shadow 0.2s, transform 0.1s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .btn-submit::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(255,255,255,0.12) 0%, transparent 60%);
+      pointer-events: none;
+    }
+
+    .btn-submit:hover {
+      background: #1bbcf7;
+      box-shadow: 0 4px 24px rgba(0, 174, 239, 0.45);
+    }
+
+    .btn-submit:active {
+      transform: scale(0.985);
+      box-shadow: 0 2px 12px rgba(0, 174, 239, 0.3);
+    }
+
+    .btn-submit:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* ── Status messages ─────────────────────────────── */
+    .status {
+      display: none;
+      margin-top: 16px;
+      padding: 13px 16px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.5;
+      border: 1px solid;
+    }
+
+    .status.success {
+      background: rgba(0, 174, 239, 0.1);
+      border-color: rgba(0, 174, 239, 0.4);
+      color: #7DD3FC;
+    }
+
+    .status.error {
+      background: rgba(255, 68, 68, 0.08);
+      border-color: rgba(255, 68, 68, 0.35);
+      color: #FCA5A5;
+    }
+
+    /* ── Footer note ─────────────────────────────────── */
+    .footer-note {
+      margin-top: 24px;
+      text-align: center;
+      font-size: 11px;
+      color: rgba(148, 163, 184, 0.55);
+      position: relative;
+      z-index: 1;
+    }
+
+    .footer-note a {
+      color: var(--blue);
+      text-decoration: none;
+      opacity: 0.8;
+    }
+
+    .footer-note a:hover { opacity: 1; }
+
+    /* ── Mobile ──────────────────────────────────────── */
+    @media (max-width: 560px) {
+      body { padding: 32px 12px 64px; }
+
+      .card { padding: 28px 20px 32px; border-radius: 12px; }
+
+      .logo { width: 72px; height: 72px; }
+
+      .form-row.two-col { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <img src="gmg_cash_logo.png" alt="GMG C.A.S.H. Report" class="logo" />
+    <h1 class="headline">Access Your C.A.S.H. Report</h1>
+    <p class="subheadline">Complete the intake below to receive your personalized marketing intelligence report.</p>
+  </div>
+
+  <!-- Card -->
+  <div class="card">
+    <form id="cashForm" novalidate>
+
+      <!-- Business Info -->
+      <div class="section-label">Business Information</div>
+
+      <div class="form-row">
+        <div class="field">
+          <label for="business_name">Business Name <span class="req">*</span></label>
+          <input
+            type="text"
+            id="business_name"
+            name="business_name"
+            placeholder="Guerrilla Marketing Group"
+            required
+            autocomplete="organization"
+          />
+        </div>
+      </div>
+
+      <div class="form-row" style="margin-top:16px;">
+        <div class="field">
+          <label for="website_url">Website or Linktree URL <span class="req">*</span></label>
+          <input
+            type="url"
+            id="website_url"
+            name="website_url"
+            placeholder="https://yourwebsite.com or https://linktr.ee/yourhandle"
+            required
+            autocomplete="url"
+          />
+          <span class="hint">Enter your main website or Linktree if you don't have a dedicated site.</span>
+        </div>
+      </div>
+
+      <!-- Audience & Budget -->
+      <div class="section-label">Audience &amp; Budget</div>
+
+      <div class="form-row">
+        <div class="field">
+          <label for="target_market">Target Market <span class="req">*</span></label>
+          <textarea
+            id="target_market"
+            name="target_market"
+            placeholder="e.g. Financial advisors, CPAs, and law firms in Australia seeking CMO-level marketing support"
+            required
+          ></textarea>
+          <span class="hint">Describe who your ideal clients are — industry, role, location, size.</span>
+        </div>
+      </div>
+
+      <div class="form-row two-col" style="margin-top:16px;">
+        <div class="field">
+          <label for="monthly_ad_budget">Monthly Ad Budget</label>
+          <input
+            type="number"
+            id="monthly_ad_budget"
+            name="monthly_ad_budget"
+            placeholder="2500"
+            min="0"
+            step="100"
+          />
+          <span class="hint">In AUD. Enter 0 if not currently running paid ads.</span>
+        </div>
+        <div class="field">
+          <label for="email_list_size">Email List / Subscriber Count</label>
+          <input
+            type="number"
+            id="email_list_size"
+            name="email_list_size"
+            placeholder="850"
+            min="0"
+          />
+        </div>
+      </div>
+
+      <div class="form-row" style="margin-top:16px;">
+        <div class="field">
+          <label for="email_frequency">Email Send Frequency</label>
+          <select id="email_frequency" name="email_frequency">
+            <option value="" disabled selected>Select frequency…</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="biweekly">Twice a month (biweekly)</option>
+            <option value="monthly">Monthly</option>
+            <option value="quarterly">Quarterly</option>
+            <option value="never">I don't send emails / No list</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Competitive Context -->
+      <div class="section-label">Competitive Context</div>
+
+      <div class="form-row">
+        <div class="field">
+          <label for="competitor_urls">Competitor Websites</label>
+          <textarea
+            id="competitor_urls"
+            name="competitor_urls"
+            placeholder="competitor1.com, competitor2.com, competitor3.com"
+            style="min-height:70px;"
+          ></textarea>
+          <span class="hint">Up to 3 competitors, separated by commas. We'll benchmark you directly against them.</span>
+        </div>
+      </div>
+
+      <div class="form-row" style="margin-top:16px;">
+        <div class="field">
+          <label for="biggest_challenge">Biggest Marketing Challenge</label>
+          <textarea
+            id="biggest_challenge"
+            name="biggest_challenge"
+            placeholder="e.g. We get website traffic but very few enquiries convert into leads…"
+          ></textarea>
+        </div>
+      </div>
+
+      <!-- Contact -->
+      <div class="section-label">Contact Details</div>
+
+      <div class="form-row two-col">
+        <div class="field">
+          <label for="contact_email">Email Address <span class="req">*</span></label>
+          <input
+            type="email"
+            id="contact_email"
+            name="contact_email"
+            placeholder="you@yourbusiness.com"
+            required
+            autocomplete="email"
+          />
+        </div>
+        <div class="field">
+          <label for="phone">Phone Number</label>
+          <input
+            type="tel"
+            id="phone"
+            name="phone"
+            placeholder="+61 4XX XXX XXX"
+            autocomplete="tel"
+          />
+        </div>
+      </div>
+
+      <!-- Consent -->
+      <div class="section-label">Consent</div>
+
+      <div class="form-row">
+        <div class="field">
+          <div class="consent-row">
+            <input type="checkbox" id="marketing_consent" name="marketing_consent" />
+            <label class="consent-label" for="marketing_consent">
+              I agree to receive my C.A.S.H. Report and occasional marketing insights from GMG. I can unsubscribe at any time. <span class="req">*</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Submit -->
+      <div class="submit-wrap">
+        <button type="submit" class="btn-submit" id="submitBtn">
+          Generate My C.A.S.H. Report
+        </button>
+        <div class="status" id="statusMsg"></div>
+      </div>
+
+    </form>
+  </div>
+
+  <!-- Footer -->
+  <p class="footer-note">
+    Your data is kept private and used only to generate your report.
+    &nbsp;·&nbsp; <a href="https://goguerrilla.xyz" target="_blank" rel="noopener">goguerrilla.xyz</a>
+  </p>
+
+  <script>
+    const form      = document.getElementById("cashForm");
+    const btn       = document.getElementById("submitBtn");
+    const statusMsg = document.getElementById("statusMsg");
+
+    // Typeform webhook endpoint — update this URL when deployed
+    const WEBHOOK_URL = "/webhook";
+
+    function showStatus(type, msg) {
+      statusMsg.className = "status " + type;
+      statusMsg.textContent = msg;
+      statusMsg.style.display = "block";
+      statusMsg.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+
+    function hideStatus() {
+      statusMsg.style.display = "none";
+    }
+
+    function validate() {
+      const required = form.querySelectorAll("[required]");
+      for (const el of required) {
+        if (el.type === "checkbox" && !el.checked) {
+          el.focus();
+          showStatus("error", "Please confirm your consent before submitting.");
+          return false;
+        }
+        if (el.type !== "checkbox" && !el.value.trim()) {
+          el.focus();
+          showStatus("error", `Please fill in the required field: ${el.closest(".field")?.querySelector("label")?.textContent?.replace("*","").trim() || el.name}.`);
+          return false;
+        }
+      }
+      return true;
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      hideStatus();
+
+      if (!validate()) return;
+
+      btn.disabled = true;
+      btn.textContent = "Submitting…";
+
+      // Build payload matching the webhook_server.py field refs
+      const payload = {
+        event_type: "form_response",
+        form_response: {
+          answers: [
+            { field: { ref: "business_name" },      type: "text",    text:   field("business_name") },
+            { field: { ref: "website_url" },         type: "url",     url:    field("website_url") },
+            { field: { ref: "target_market" },       type: "text",    text:   field("target_market") },
+            { field: { ref: "monthly_ad_budget" },   type: "number",  number: parseFloat(field("monthly_ad_budget")) || 0 },
+            { field: { ref: "email_list_size" },     type: "number",  number: parseFloat(field("email_list_size")) || 0 },
+            { field: { ref: "email_frequency" },     type: "text",    text:   field("email_frequency") },
+            { field: { ref: "competitor_urls" },     type: "text",    text:   field("competitor_urls") },
+            { field: { ref: "biggest_challenge" },   type: "text",    text:   field("biggest_challenge") },
+            { field: { ref: "contact_email" },       type: "email",   email:  field("contact_email") },
+            { field: { ref: "phone" },               type: "phone_number", phone_number: field("phone") },
+            { field: { ref: "marketing_consent" },   type: "boolean", boolean: document.getElementById("marketing_consent").checked },
+          ].filter(a => {
+            // Remove empty optional fields so the server doesn't misread them
+            const v = a.text || a.url || a.email || a.phone_number;
+            return a.boolean !== undefined || (a.number !== undefined && !isNaN(a.number)) || (v && v.trim() !== "");
+          })
+        }
+      };
+
+      function field(id) {
+        return (document.getElementById(id)?.value || "").trim();
+      }
+
+      try {
+        const res = await fetch(WEBHOOK_URL, {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify(payload),
+        });
+
+        if (res.status === 202 || res.status === 200) {
+          btn.textContent = "Report Submitted ✓";
+          showStatus("success",
+            "Your C.A.S.H. Report is being generated. You'll receive it by email within a few minutes.");
+          form.querySelectorAll("input, textarea, select, button").forEach(el => el.disabled = true);
+        } else if (res.status === 429) {
+          showStatus("error",
+            "A report for this email or website has already been requested recently. Please check your inbox or contact GMG directly.");
+          btn.disabled = false;
+          btn.textContent = "Generate My C.A.S.H. Report";
+        } else {
+          throw new Error(`Server responded with ${res.status}`);
+        }
+      } catch (err) {
+        showStatus("error",
+          "Something went wrong submitting your form. Please try again or contact gmg@goguerrilla.xyz.");
+        btn.disabled = false;
+        btn.textContent = "Generate My C.A.S.H. Report";
+      }
+    });
+  </script>
+
+</body>
+</html>

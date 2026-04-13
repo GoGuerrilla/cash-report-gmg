@@ -1,0 +1,115 @@
+================================================================================
+WIX STUDIO VELO BACKEND — http-functions.js
+================================================================================
+
+WHERE TO PASTE THIS CODE:
+--------------------------
+1. Open your Wix Studio site in the editor
+2. Click the "{}" (Dev Mode / Velo) icon to enable Velo if not already on
+3. In the left panel, find the "Backend" section
+4. Look for a file named "http-functions.js" — if it does not exist, click
+   the "+" next to Backend and choose "New Web Module", then name it
+   exactly: http-functions.js
+5. Replace ALL existing content in that file with the code below
+6. Click "Save" (Cmd+S / Ctrl+S)
+7. Click "Publish" to make the endpoint live
+
+IMPORTANT NOTES:
+--------------------------
+- The endpoint URL will be:
+    https://www.<your-wix-domain>.com/_functions/cashReportSubmit
+  (Replace <your-wix-domain> with your actual Wix site domain)
+- Replace PYTHON_WEBHOOK_URL below with the actual URL of your Python
+  webhook server before saving
+- This file must be named exactly "http-functions.js" — no other name works
+
+================================================================================
+PASTE THIS CODE INTO http-functions.js:
+================================================================================
+
+import { ok, serverError } from 'wix-http-functions';
+import { fetch } from 'wix-fetch';
+
+const PYTHON_WEBHOOK_URL = 'https://YOUR-PYTHON-SERVER-URL/webhook';
+// ^^^ Replace with your actual Python webhook server URL
+
+export async function post_cashReportSubmit(request) {
+  const headers = { 'Content-Type': 'application/json' };
+
+  try {
+    // Parse the incoming JSON body from the form
+    const body = await request.body.json();
+
+    // Forward the complete payload to the Python webhook server
+    const response = await fetch(PYTHON_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    if (!response.ok) {
+      return serverError({
+        headers,
+        body: JSON.stringify({ success: false, message: 'Submission failed' })
+      });
+    }
+
+    return ok({
+      headers,
+      body: JSON.stringify({ success: true, message: 'Report request received' })
+    });
+
+  } catch (error) {
+    return serverError({
+      headers,
+      body: JSON.stringify({ success: false, message: 'Submission failed' })
+    });
+  }
+}
+
+================================================================================
+HOW IT WORKS:
+================================================================================
+
+1. ENDPOINT:  POST https://<your-site>/_functions/cashReportSubmit
+   - Wix maps the function name "post_cashReportSubmit" to
+     POST requests at the path /cashReportSubmit automatically
+
+2. BODY PARSING:
+   - request.body.json() reads and parses the incoming JSON body
+     sent by your form
+
+3. FORWARDING:
+   - The full parsed payload is re-serialized and forwarded via
+     wix-fetch (Wix's built-in fetch) to your Python webhook server
+
+4. SUCCESS RESPONSE:
+   {
+     "success": true,
+     "message": "Report request received"
+   }
+
+5. ERROR RESPONSE (forwarding failed OR any exception):
+   {
+     "success": false,
+     "message": "Submission failed"
+   }
+
+6. HEADERS:
+   - Content-Type: application/json is set on all responses
+
+================================================================================
+TESTING THE ENDPOINT:
+================================================================================
+
+Once published, test with curl:
+
+  curl -X POST \
+    https://<your-wix-domain>/_functions/cashReportSubmit \
+    -H "Content-Type: application/json" \
+    -d '{"test": "hello"}'
+
+Expected response:
+  {"success":true,"message":"Report request received"}
+
+================================================================================

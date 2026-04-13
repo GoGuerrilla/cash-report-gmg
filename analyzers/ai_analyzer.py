@@ -1,0 +1,577 @@
+"""
+AI Analyzer — C.A.S.H. Report by GMG
+Computes quantitative C.A.S.H. scores from real audit data, then uses Claude
+to generate all narrative fields (recommendations, 90-day plan, waste/opportunity,
+channel strategy, competitive positioning).
+
+Data flow:
+  1. _rule_based_analysis() — always runs first; populates every score field from
+     real audit data so the report is never empty even without an API key.
+  2. _analyze_with_claude() — when ANTHROPIC_API_KEY is available, sends the full
+     audit data to Claude and overlays its response on top of the rule-based scores.
+     Narrative fields (biggest_waste, biggest_opportunity, etc.) are intentionally
+     left empty by rule_based so Claude is the sole source for those fields.
+  3. Overlay — rule_based values are only kept where Claude returned null/empty.
+
+Narrative fields ONLY populated by Claude (never hardcoded):
+  - executive_summary
+  - biggest_waste
+  - biggest_opportunity
+  - top_3_priorities
+  - channel_recommendation
+  - content_strategy
+  - budget_recommendation
+  - 90_day_action_plan
+  - competitive_positioning
+  - icp_alignment_verdict
+"""
+import json
+import os
+from typing import Dict, Any, List
+
+from config import ClientConfig
+
+# Load .env automatically when this module is imported so callers don't have to
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
+except ImportError:
+    pass
+
+
+class AIAnalyzer:
+    def __init__(self, anthropic_api_key: str = "", openai_api_key: str = ""):
+        # Accept explicit key, or fall back to environment variable
+        self.anthropic_key = anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+        self.openai_key    = openai_api_key    or os.environ.get("OPENAI_API_KEY", "")
+
+    # ── Public entry point ─────────────────────────────────────
+
+    def analyze(self, config: ClientConfig, audit_data: dict) -> Dict[str, Any]:
+        """
+        Returns a complete dict of scores + narrative fields.
+        Rule-based scores are always computed from real data.
+        Narrative fields come from Claude (or OpenAI) when a key is present;
+        they are left empty otherwise rather than filled with invented text.
+        """
+        base = self._rule_based_analysis(config, audit_data)
+
+        if self.anthropic_key:
+            print("   → Sending audit data to Claude for narrative analysis...")
+            ai_result = self._analyze_with_claude(config, audit_data)
+            if not ai_result.get("parse_error"):
+                # Overlay Claude values; keep rule-based only where Claude returned nothing
+                for key, val in ai_result.items():
+                    if val is not None and val != "" and val != [] and val != {}:
+                        base[key] = val
+                base["data_source"] = "claude"
+            else:
+                print("   ⚠️  Claude response could not be parsed — scores kept, narrative empty")
+                base["data_source"] = "rule_based"
+        elif self.openai_key:
+            print("   → Sending audit data to OpenAI for narrative analysis...")
+            ai_result = self._analyze_with_openai(config, audit_data)
+            if not ai_result.get("parse_error"):
+                for key, val in ai_result.items():
+                    if val is not None and val != "" and val != [] and val != {}:
+                        base[key] = val
+                base["data_source"] = "openai"
+            else:
+                print("   ⚠️  OpenAI response could not be parsed — scores kept, narrative empty")
+                base["data_source"] = "rule_based"
+        else:
+            base["data_source"] = "rule_based"
+
+        return base
+
+    # ── Claude ────────────────────────────────────────────────
+
+    def _analyze_with_claude(self, config: ClientConfig, audit_data: dict) -> Dict:
+        try:
+            import anthropic
+        except ImportError:
+            print("   ⚠️  anthropic package not installed — pip install anthropic")
+            return {"parse_error": True}
+
+        client = anthropic.Anthropic(api_key=self.anthropic_key)
+        prompt = self._build_prompt(config, audit_data)
+        try:
+            message = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=4096,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            result = self._parse_ai_response(message.content[0].text)
+            return result
+        except Exception as e:
+            print(f"   ⚠️  Claude API error: {e}")
+            return {"parse_error": True}
+
+    # ── OpenAI ────────────────────────────────────────────────
+
+    def _analyze_with_openai(self, config: ClientConfig, audit_data: dict) -> Dict:
+        try:
+            import openai
+        except ImportError:
+            print("   ⚠️  openai package not installed — pip install openai")
+            return {"parse_error": True}
+
+        client = openai.OpenAI(api_key=self.openai_key)
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": self._build_prompt(config, audit_data)}],
+                max_tokens=3000,
+            )
+            result = self._parse_ai_response(response.choices[0].message.content)
+            return result
+        except Exception as e:
+            print(f"   ⚠️  OpenAI API error: {e}")
+            return {"parse_error": True}
+
+    # ── Prompt ────────────────────────────────────────────────
+
+    def _build_prompt(self, config: ClientConfig, audit_data: dict) -> str:
+        cash       = self._compute_cash_scores(config, audit_data)
+        web_scores = audit_data.get("website", {}).get("scores", {})
+        seo        = audit_data.get("seo", {})
+        icp        = audit_data.get("icp", {})
+        brand      = audit_data.get("brand", {})
+        funnel     = audit_data.get("funnel", {})
+        freshness  = audit_data.get("freshness", {})
+        geo        = audit_data.get("geo", {})
+
+        # Pull real issues from every auditor — these are the actual findings
+        all_issues: List[str] = []
+        all_strengths: List[str] = []
+        for section in [seo, icp, brand, funnel, freshness,
+                        audit_data.get("social", {}), audit_data.get("website", {}),
+                        audit_data.get("content", {}), geo]:
+            all_issues.extend(section.get("issues", []))
+            all_strengths.extend(section.get("strengths", []))
+
+        # Funnel stage issues
+        stages = funnel.get("stages", {})
+        for stage in stages.values():
+            all_issues.extend(stage.get("issues", []))
+            all_strengths.extend(stage.get("strengths", []))
+
+        channels        = config.active_social_channels
+        icp_verdict     = icp.get("icp_verdict", "")
+        api_blocked     = freshness.get("api_blocked_platforms", [])
+        scraping_note   = freshness.get("scraping_note", "")
+        channel_scores  = freshness.get("channels", {})
+
+        # Build a concise freshness summary for the prompt
+        freshness_lines = []
+        for platform, data in channel_scores.items():
+            status = data.get("status", "unknown")
+            ppw    = data.get("posts_per_week")
+            days   = data.get("days_since_last_post")
+            if status == "api_blocked":
+                freshness_lines.append(f"  {platform}: API-blocked (score 50 neutral, no real data)")
+            elif ppw or days:
+                freshness_lines.append(
+                    f"  {platform}: {status}, {ppw or '?'}x/week, {days or '?'} days since last post"
+                )
+            else:
+                freshness_lines.append(f"  {platform}: {status}")
+
+        return f"""You are a senior B2B digital marketing strategist. Analyze this real marketing audit data and respond ONLY with valid JSON — no markdown, no explanation.
+
+CLIENT: {config.client_name}
+INDUSTRY: {config.client_industry}
+STATED TARGET MARKET: {config.stated_target_market}
+STATED VALUE PROP: {config.stated_value_prop or "Not provided"}
+PRIMARY GOAL: {config.primary_goal}
+MONTHLY AD BUDGET: ${config.monthly_ad_budget:,.0f}
+TEAM SIZE: {config.team_size}
+ACTIVE CHANNELS: {', '.join(channels) if channels else 'None'}
+EMAIL LIST: {config.email_list_size:,} contacts
+HAS NEWSLETTER: {config.has_active_newsletter}
+HAS REFERRAL SYSTEM: {config.has_referral_system}
+HAS LEAD MAGNET: {config.has_lead_magnet}
+BOOKING TOOL: {config.booking_tool or "None"}
+CURRENT CLIENTS: {config.current_client_count} ({config.current_client_types or "types unknown"})
+TOP COMPETITORS: {', '.join(config.top_competitors) if config.top_competitors else "None listed"}
+
+C.A.S.H. SCORES (computed from real audit data):
+  C — Content:        {cash['C']}/100
+  A — Audience:       {cash['A']}/100
+  S — Sales:          {cash['S']}/100
+  H — Hold/Retention: {cash['H']}/100
+  Overall:            {cash['overall']}/100
+
+COMPONENT SCORES:
+  SEO:               {seo.get('score', 50)}/100  (method: {seo.get('method', 'unknown')})
+  Performance:       {seo.get('performance_score', '?')}/100
+  Accessibility:     {seo.get('accessibility_score', '?')}/100
+  ICP Alignment:     {icp.get('score', 50)}/100
+  Brand Consistency: {brand.get('score', 50)}/100
+  Website Technical: {web_scores.get('technical', 50)}/100
+  Website Content:   {web_scores.get('content', 50)}/100
+  Website Conversion:{web_scores.get('conversion', 50)}/100
+  GEO (AI Visibility):{geo.get('score', 50)}/100
+
+CORE WEB VITALS: {seo.get('core_web_vitals', {})}
+
+ICP ALIGNMENT VERDICT (computed):
+{icp_verdict}
+
+CONTENT FRESHNESS BY CHANNEL:
+{chr(10).join(freshness_lines) if freshness_lines else "  No channel data available"}
+{f"Note: {scraping_note}" if scraping_note else ""}
+
+TOP ISSUES FOUND (real audit findings — use these to drive your recommendations):
+{chr(10).join(f"  {i}" for i in all_issues[:25])}
+
+TOP STRENGTHS FOUND:
+{chr(10).join(f"  {s}" for s in all_strengths[:15])}
+
+Respond with ONLY this exact JSON (no markdown fences, no extra keys):
+{{
+  "executive_summary": "2-3 sentences summarizing the most critical finding and the single highest-leverage action, specific to this client's data",
+  "overall_grade": "A/B/C/D/F",
+  "overall_score": 0,
+  "cash_c_score": 0,
+  "cash_a_score": 0,
+  "cash_s_score": 0,
+  "cash_h_score": 0,
+  "top_3_priorities": [
+    {{"priority": 1, "action": "specific action based on real issues above", "impact": "measurable expected result", "timeline": "timeframe"}},
+    {{"priority": 2, "action": "specific action based on real issues above", "impact": "measurable expected result", "timeline": "timeframe"}},
+    {{"priority": 3, "action": "specific action based on real issues above", "impact": "measurable expected result", "timeline": "timeframe"}}
+  ],
+  "biggest_waste": "the single biggest waste of time or money, with specific evidence from the audit data above",
+  "biggest_opportunity": "the single highest-ROI opportunity, with specific how-to steps based on this client's actual situation",
+  "icp_alignment_verdict": "plain-language verdict on how well current content/channels match the stated target market, based on the ICP data above",
+  "channel_recommendation": "specific channel strategy for this client based on their active channels, ICP, and budget",
+  "content_strategy": "specific content recommendation based on what gaps were actually found in this audit",
+  "budget_recommendation": "specific budget advice based on the actual budget and channel data found",
+  "90_day_action_plan": [
+    {{"week": "1-2", "action": "specific action", "outcome": "expected result"}},
+    {{"week": "3-4", "action": "specific action", "outcome": "expected result"}},
+    {{"week": "5-8", "action": "specific action", "outcome": "expected result"}},
+    {{"week": "9-12", "action": "specific action", "outcome": "expected result"}}
+  ],
+  "competitive_positioning": "how this client can differentiate from their specific competitors based on audit findings"
+}}"""
+
+    # ── JSON parser ───────────────────────────────────────────
+
+    def _parse_ai_response(self, raw: str) -> Dict:
+        try:
+            clean = raw.strip()
+            # Strip markdown fences if present
+            if clean.startswith("```"):
+                lines = clean.split("\n")
+                lines = [l for l in lines if not l.startswith("```")]
+                clean = "\n".join(lines).strip()
+            return json.loads(clean)
+        except json.JSONDecodeError:
+            # Attempt to recover from truncated JSON
+            try:
+                clean = clean.strip()
+                depth_brace   = clean.count("{") - clean.count("}")
+                depth_bracket = clean.count("[") - clean.count("]")
+                if depth_bracket > 0 or depth_brace > 0:
+                    clean = clean.rsplit("\n", 1)[0].rstrip(",").rstrip()
+                    clean += "]" * depth_bracket + "}" * depth_brace
+                    return json.loads(clean)
+            except Exception:
+                pass
+            return {"executive_summary": raw[:500], "parse_error": True}
+        except Exception:
+            return {"executive_summary": raw[:500], "parse_error": True}
+
+    # ── C.A.S.H. score computation (always from real data) ────
+
+    def _compute_cash_scores(self, config: ClientConfig, audit_data: dict) -> Dict:
+        icp    = audit_data.get("icp", {}).get("score", 50)
+        brand  = audit_data.get("brand", {}).get("score", 50)
+        fresh  = audit_data.get("freshness", {}).get("score", 50)
+        seo    = audit_data.get("seo", {}).get("score", 50)
+        web    = audit_data.get("website", {}).get("scores", {})
+        funnel = audit_data.get("funnel", {})
+        stages = funnel.get("stages", {})
+        social_n = len(config.active_social_channels)
+
+        def stage_score(stage: dict) -> int:
+            # Count only real critical issues, not "could not be verified" ones
+            n_crit = len([i for i in stage.get("issues", [])
+                          if "🔴" in i
+                          and "could not be verified" not in i
+                          and "unknown" not in i.lower()])
+            n_str  = len(stage.get("strengths", []))
+            # Penalty capped at 3 criticals to prevent cascade collapse.
+            # Floor at 35: a real stage with confirmed gaps = D range, not F.
+            base   = 50 - (min(n_crit, 3) * 7) + (n_str * 8)
+            return max(35, min(100, base)) if n_crit > 0 else max(50, min(100, 50 + n_str * 8))
+
+        c = round((fresh + seo + web.get("content", 50)) / 3)
+        a = round((icp + brand + min(social_n * 15, 80)) / 3)
+        s = round((stage_score(stages.get("capture", {})) +
+                   stage_score(stages.get("conversion", {})) +
+                   web.get("conversion", 50)) / 3)
+        h = round((stage_score(stages.get("nurture", {})) +
+                   stage_score(stages.get("trust",   {}))) / 2)
+
+        overall = round(c * 0.20 + a * 0.30 + s * 0.30 + h * 0.20)
+        return {"C": c, "A": a, "S": s, "H": h, "overall": overall}
+
+    # ── Rule-based baseline ───────────────────────────────────
+
+    def _rule_based_analysis(self, config: ClientConfig, audit_data: dict) -> Dict:
+        """
+        Computes all quantitative fields AND baseline narrative fields from real audit data.
+        When Claude/OpenAI key is present their responses overlay these values.
+        When no key is available the report still contains meaningful, data-driven content.
+        """
+        cash      = self._compute_cash_scores(config, audit_data)
+        score     = cash["overall"]
+        grade     = "A" if score >= 80 else "B" if score >= 65 else "C" if score >= 50 else "D" if score >= 35 else "F"
+        icp_verdict = audit_data.get("icp", {}).get("icp_verdict", "")
+
+        icp    = audit_data.get("icp", {})
+        brand  = audit_data.get("brand", {})
+        funnel = audit_data.get("funnel", {})
+        seo    = audit_data.get("seo", {})
+        geo    = audit_data.get("geo", {})
+        fresh  = audit_data.get("freshness", {})
+
+        funnel_stages = funnel.get("stages", {})
+        channels      = len(config.active_social_channels)
+        budget        = config.monthly_ad_budget
+
+        # ── Collect top critical issues across all auditors ─────
+        all_critical = []
+        for section in [icp, brand, funnel, seo, geo,
+                        audit_data.get("social", {}),
+                        audit_data.get("website", {}),
+                        audit_data.get("content", {})]:
+            all_critical.extend(
+                i for i in section.get("issues", []) if "🔴" in i
+            )
+        for stage in funnel_stages.values():
+            all_critical.extend(i for i in stage.get("issues", []) if "🔴" in i)
+
+        # Clean emoji prefix for readable text
+        def _clean(s): return s.replace("🔴 ", "").replace("🟡 ", "").replace("✅ ", "")
+
+        # ── Executive summary (data-driven, no invented text) ───
+        icp_score   = icp.get("score", 50)
+        funnel_score = funnel.get("score", 50)
+        top_issue   = _clean(all_critical[0]) if all_critical else "multiple gaps identified across content, funnel, and ICP alignment"
+        exec_summary = (
+            f"{config.client_name} scored {score}/100 ({grade}) overall on the C.A.S.H. framework. "
+            f"The most critical finding: {top_issue.rstrip('.')}. "
+            f"ICP alignment ({icp_score}/100) and lead funnel ({funnel_score}/100) are the "
+            f"highest-leverage areas — fixing these will have the greatest impact on "
+            f"{config.primary_goal}."
+        )
+
+        # ── Data-driven priorities ──────────────────────────────
+        priorities = []
+        web_issues = audit_data.get("website", {}).get("issues", [])
+
+        if any("HTTPS" in i or "https" in i.lower() for i in web_issues):
+            priorities.append({
+                "priority": 1,
+                "action":   "Migrate website to HTTPS",
+                "impact":   "Eliminates browser security warnings and SEO penalty",
+                "timeline": "1-3 days",
+            })
+
+        if icp_score < 50:
+            priorities.append({
+                "priority": len(priorities) + 1,
+                "action":   f"Rewrite all public-facing copy to speak directly to {config.stated_target_market}",
+                "impact":   "Dramatically increases ICP self-identification and lead relevance",
+                "timeline": "1-2 weeks",
+            })
+
+        if not config.has_lead_magnet:
+            priorities.append({
+                "priority": len(priorities) + 1,
+                "action":   "Create a lead magnet specific to your ICP (free audit, checklist, or guide)",
+                "impact":   "Starts building an owned email list; first step in a functioning lead funnel",
+                "timeline": "2 weeks",
+            })
+
+        if not config.has_active_newsletter and config.email_list_size == 0:
+            priorities.append({
+                "priority": len(priorities) + 1,
+                "action":   "Launch a biweekly email newsletter for your ICP",
+                "impact":   "Owned channel that compounds over time; not subject to algorithm changes",
+                "timeline": "2 weeks",
+            })
+
+        if channels > 4:
+            priorities.append({
+                "priority": len(priorities) + 1,
+                "action":   f"Consolidate from {channels} social channels to the 2-3 highest-fit platforms",
+                "impact":   "Recovers 5-10 hrs/week and concentrates audience-building effort",
+                "timeline": "30 days",
+            })
+
+        if budget == 0 and cash["S"] < 50:
+            priorities.append({
+                "priority": len(priorities) + 1,
+                "action":   "Allocate a small paid acquisition budget to your primary ICP channel",
+                "impact":   "Accelerates lead flow while organic channels are being built",
+                "timeline": "2 weeks",
+            })
+
+        priorities = priorities[:3]
+        for i, p in enumerate(priorities):
+            p["priority"] = i + 1
+
+        # ── Biggest waste (from real audit data) ────────────────
+        waste_candidates = [
+            i for i in brand.get("issues", [])
+            if "🔴" in i and any(p in i for p in ["Discord", "Instagram", "TikTok", "low-fit"])
+        ]
+        biggest_waste = (
+            _clean(waste_candidates[0]) if waste_candidates
+            else f"Spreading content effort across {channels} channels without ICP-specific messaging — "
+                 f"all channels carry the same general small-business positioning that the "
+                 f"stated ICP ({config.stated_target_market}) does not respond to."
+        )
+
+        # ── Biggest opportunity (from real audit data) ──────────
+        if not config.has_lead_magnet and not config.has_active_newsletter:
+            biggest_opp = (
+                f"Building an ICP-specific email list from zero. "
+                f"Create a free resource for {config.stated_target_market}, "
+                f"add an opt-in to the website, and set up a 5-email welcome sequence. "
+                f"With 42:1 email ROI and 0 current contacts, this is the highest-leverage move available."
+            )
+        elif icp_score < 50:
+            biggest_opp = (
+                f"Rewiring the brand's public messaging to speak directly to "
+                f"{config.stated_target_market}. "
+                f"LinkedIn presence ({audit_data.get('freshness',{}).get('channels',{}).get('LinkedIn',{}).get('posts_per_week','?')}x/week) "
+                f"is already active — shifting topics to ICP-specific pain points would convert "
+                f"existing reach into qualified prospects."
+            )
+        else:
+            biggest_opp = (
+                f"Converting existing LinkedIn activity into a structured lead funnel. "
+                f"Add a lead magnet, email opt-in, and nurture sequence to capture "
+                f"value from current content efforts."
+            )
+
+        # ── Channel recommendation ──────────────────────────────
+        channel_recs = []
+        if "LinkedIn" in config.active_social_channels:
+            channel_recs.append("LinkedIn (primary): double posting frequency, shift to ICP-specific topics")
+        low_fit = brand.get("platform_fit", {}).get("low_fit", [])
+        if low_fit:
+            channel_recs.append(f"Pause or deprioritize: {', '.join(low_fit)} — near-zero ICP overlap")
+        channel_recs.append("Email newsletter: highest-ROI channel for B2B financial services — launch immediately")
+        channel_recommendation = ". ".join(channel_recs) + "."
+
+        # ── Content strategy ────────────────────────────────────
+        icp_signals = icp.get("content_alignment", {}).get("financial_signals_found", [])
+        content_strategy = (
+            f"Current content covers general marketing topics with {len(icp_signals)} ICP-specific signals detected. "
+            f"Shift immediately to topics that speak to {config.stated_target_market}: "
+            f"compliance-aware content marketing, referral generation, practice growth, and "
+            f"building authority in regulated industries. "
+            f"One pillar piece per week (LinkedIn article or video) repurposed into 5 posts."
+        )
+
+        # ── Budget recommendation ───────────────────────────────
+        if budget == 0:
+            budget_recommendation = (
+                f"Currently $0 in paid spend. Organic-only is viable but slow. "
+                f"Recommended: $500-1,000/month in LinkedIn Sponsored Content targeting "
+                f"{config.stated_target_market} by job title. "
+                f"Run lead-gen ads to the ICP-specific lead magnet once it's built."
+            )
+        else:
+            budget_recommendation = (
+                f"${budget:,.0f}/month budget. Prioritize LinkedIn Sponsored Content "
+                f"for ICP targeting. Allocate 70% to lead generation, 30% to retargeting "
+                f"website visitors."
+            )
+
+        # ── 90-day action plan (from real findings) ─────────────
+        plan_90 = [
+            {
+                "week":    "1-2",
+                "action":  (
+                    f"Rewrite Linktree bio, LinkedIn headline, and website homepage copy "
+                    f"to speak directly to {config.stated_target_market}. "
+                    f"Remove Web3/crypto language from all public-facing channels."
+                    if icp_score < 50
+                    else "Audit and align all public-facing copy to ICP pain points."
+                ),
+                "outcome": "First impression now immediately resonates with target ICP",
+            },
+            {
+                "week":    "3-4",
+                "action":  (
+                    "Build and publish an ICP-specific lead magnet "
+                    f"(e.g. 'Free Marketing Audit for {config.stated_target_market.split(',')[0]}s'). "
+                    "Add email opt-in to website and Linktree."
+                    if not config.has_lead_magnet
+                    else "Set up 5-email welcome sequence for new list subscribers."
+                ),
+                "outcome": "Email list begins growing; owned channel established",
+            },
+            {
+                "week":    "5-8",
+                "action":  (
+                    f"Publish 2 LinkedIn articles on ICP-specific topics "
+                    f"(e.g. compliance-safe content marketing, referral strategies for "
+                    f"{config.stated_target_market.split(',')[0]}s). "
+                    f"Reach out to 3 past/current clients for testimonials and 1 case study."
+                ),
+                "outcome": "Authority content pipeline started; social proof collected",
+            },
+            {
+                "week":    "9-12",
+                "action":  (
+                    f"Launch biweekly email newsletter. "
+                    f"Replace Google Calendar booking link with a professional scheduling page. "
+                    f"Publish case study on website. "
+                    f"{'Reduce to 2-3 highest-fit channels. ' if channels > 4 else ''}"
+                    f"Review C.A.S.H. scores and set 90-day targets for next quarter."
+                ),
+                "outcome": "Full nurture system operational; measurable pipeline activity",
+            },
+        ]
+
+        # ── Competitive positioning ─────────────────────────────
+        competitors = config.top_competitors
+        competitive_positioning = (
+            f"Primary competitors ({', '.join(competitors[:3]) if competitors else 'market'}) "
+            f"serve the financial services marketing space with template-heavy, "
+            f"compliance-first platforms. GMG's differentiation opportunity: "
+            f"hands-on fractional CMO engagement with custom content strategy, "
+            f"not a software subscription. Position as the high-touch alternative "
+            f"for practices that want a real marketing partner, not another tool."
+        )
+
+        return {
+            "data_source":            "rule_based",
+            "overall_grade":          grade,
+            "overall_score":          score,
+            "cash_c_score":           cash["C"],
+            "cash_a_score":           cash["A"],
+            "cash_s_score":           cash["S"],
+            "cash_h_score":           cash["H"],
+            "component_scores":       cash,
+            "top_3_priorities":       priorities,
+            "icp_alignment_verdict":  icp_verdict,
+            # Narrative fields — built from real audit data; Claude overlays when key present
+            "executive_summary":      exec_summary,
+            "biggest_waste":          biggest_waste,
+            "biggest_opportunity":    biggest_opp,
+            "channel_recommendation": channel_recommendation,
+            "content_strategy":       content_strategy,
+            "budget_recommendation":  budget_recommendation,
+            "90_day_action_plan":     plan_90,
+            "competitive_positioning": competitive_positioning,
+        }
