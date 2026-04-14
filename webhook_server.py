@@ -817,6 +817,86 @@ def webhook():
 
 
 # ══════════════════════════════════════════════════════════════════
+#  WIX FORM ENDPOINT
+# ══════════════════════════════════════════════════════════════════
+
+@app.route("/cash-report", methods=["POST"])
+def cash_report():
+    """
+    Plain-JSON endpoint for the Wix CASH Report submission form.
+    Accepts these fields:
+      business_name, website_url, target_market, ad_budget,
+      email_list_size, email_frequency, competitors,
+      biggest_challenge, contact_email, phone, marketing_consent
+    Returns 202 immediately; audit runs in a background thread.
+    """
+    try:
+        data = request.get_json(force=True, silent=True)
+    except Exception:
+        data = None
+
+    if not data:
+        return jsonify({"success": False, "message": "Invalid or missing JSON body"}), 400
+
+    # Map Wix field names → internal parsed-field dict
+    parsed = {
+        "business_name":      str(data.get("business_name", "")).strip(),
+        "website_url":        str(data.get("website_url", "")).strip(),
+        "target_market":      str(data.get("target_market", "")).strip(),
+        "monthly_ad_budget":  str(data.get("ad_budget", "0")).strip(),
+        "email_list_size":    str(data.get("email_list_size", "0")).strip(),
+        "email_frequency":    str(data.get("email_frequency", "")).strip(),
+        "competitor_urls":    str(data.get("competitors", "")).strip(),
+        "biggest_challenge":  str(data.get("biggest_challenge", "")).strip(),
+        "contact_email":      str(data.get("contact_email", "")).strip(),
+        "phone":              str(data.get("phone", "")).strip(),
+        "marketing_consent":  str(data.get("marketing_consent", "no")).strip(),
+    }
+
+    if not parsed["contact_email"]:
+        return jsonify({"success": False, "message": "contact_email is required"}), 422
+
+    log.info("Wix form submission — email=%s  business=%r",
+             parsed["contact_email"], parsed["business_name"])
+
+    try:
+        config = build_config_from_parsed(parsed)
+    except Exception as e:
+        log.error("Config build failed for Wix submission: %s", e)
+        return jsonify({"success": False, "message": "Submission failed"}), 500
+
+    contact_email = config.contact_email
+    website_url   = config.website_url or config.linktree_url
+    ip_address    = request.remote_addr or None
+
+    # Rate limit check
+    rl = RateLimiter()
+    pub_ip = get_public_ip() if not rl.bypass else None
+    allowed, reason = rl.check(
+        email       = contact_email,
+        website_url = website_url,
+        ip_address  = pub_ip or ip_address,
+    )
+    if not allowed:
+        log.info("Rate limit blocked Wix submission: %s", contact_email)
+        _send_rejection_email(contact_email, config.client_name, reason)
+        return jsonify({"success": False, "message": "Too many submissions. Please try again later."}), 429
+
+    # Launch audit in background thread
+    token = f"wix-{contact_email}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    t = threading.Thread(
+        target = _audit_thread,
+        args   = (config, rl, contact_email, website_url, pub_ip or ip_address, token),
+        daemon = True,
+        name   = f"wix-audit-{contact_email[:12]}",
+    )
+    t.start()
+    log.info("Wix audit thread launched — client=%r  email=%s", config.client_name, contact_email)
+
+    return jsonify({"success": True, "message": "Report request received"}), 202
+
+
+# ══════════════════════════════════════════════════════════════════
 #  REJECTION EMAIL HELPER
 # ══════════════════════════════════════════════════════════════════
 
