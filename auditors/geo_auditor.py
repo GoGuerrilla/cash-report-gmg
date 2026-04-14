@@ -158,6 +158,9 @@ class GEOAuditor:
         issues, strengths = self._collect_issues_strengths(components)
         recommendations   = self._build_recommendations(components)
 
+        crawl_available = bool(self._onpage)
+        gsc_available   = serp.get("total_clicks") is not None
+
         return {
             "score":            overall,
             "grade":            _grade(overall),
@@ -167,6 +170,17 @@ class GEOAuditor:
             "strengths":        strengths,
             "recommendations":  recommendations,
             "platform_notes":   self._platform_notes(components),
+            # Data source status — surfaced clearly in the report
+            "data_sources": {
+                "public_crawl": (
+                    "available" if crawl_available
+                    else "unavailable — site could not be reached"
+                ),
+                "gsc": (
+                    "connected — SERP data included" if gsc_available
+                    else "unavailable — audit completed using public-site signals only"
+                ),
+            },
             # Expose rich sub-data for the PDF section
             "serp_keywords":    serp.get("top_keywords", []),
             "serp_summary":     {
@@ -186,6 +200,12 @@ class GEOAuditor:
                 "has_faq_schema":   onpage.get("has_faq_schema", False),
                 "schema_types":     onpage.get("schema_types", []),
                 "word_count":       onpage.get("word_count", 0),
+                # Extended crawl signals
+                "canonical_url":    onpage.get("canonical_url", ""),
+                "is_noindex":       onpage.get("is_noindex", False),
+                "og_tags":          onpage.get("og_tags", []),
+                "has_og_image":     onpage.get("has_og_image", False),
+                "has_twitter_card": onpage.get("has_twitter_card", False),
             },
         }
 
@@ -242,6 +262,27 @@ class GEOAuditor:
             # Word count
             word_count = len(re.findall(r"\b\w+\b", soup.get_text(separator=" ")))
 
+            # Canonical tag
+            canon_tag = soup.find("link", rel="canonical")
+            canonical_url = canon_tag.get("href", "").strip() if canon_tag else ""
+
+            # Indexability — meta robots noindex check
+            robots_meta = soup.find("meta", attrs={"name": re.compile("^robots$", re.I)})
+            robots_content = (robots_meta.get("content") or "").lower() if robots_meta else ""
+            is_noindex = "noindex" in robots_content
+
+            # Open Graph tags
+            og_tags = soup.find_all(
+                "meta", attrs={"property": lambda x: x and x.startswith("og:")}
+            )
+            og_list = [t.get("property", "") for t in og_tags]
+
+            # Twitter Card tags
+            tw_tags = soup.find_all(
+                "meta", attrs={"name": lambda x: x and x.lower().startswith("twitter:")}
+            )
+            tw_list = [t.get("name", "") for t in tw_tags]
+
             return {
                 "title":              title,
                 "meta_description":   meta_desc,
@@ -250,6 +291,15 @@ class GEOAuditor:
                 "schema_types":       schema_types,
                 "has_faq_schema":     has_faq_schema,
                 "word_count":         word_count,
+                "canonical_url":      canonical_url,
+                "has_canonical":      bool(canonical_url),
+                "is_noindex":         is_noindex,
+                "og_tags":            og_list,
+                "has_og_tags":        len(og_list) > 0,
+                "has_og_image":       any("og:image" in t for t in og_list),
+                "has_og_title":       any("og:title" in t for t in og_list),
+                "twitter_tags":       tw_list,
+                "has_twitter_card":   len(tw_list) > 0,
             }
         except Exception:
             return {}
@@ -308,16 +358,18 @@ class GEOAuditor:
             return []
 
     def _score_serp_visibility(self) -> Dict:
-        rows = self._fetch_gsc_rows()
+        try:
+            rows = self._fetch_gsc_rows()
+        except Exception:
+            rows = []
 
         if not rows:
             return {
                 "score":   50,
                 "status":  "unknown",
-                "detail":  "Search Console data unavailable.",
+                "detail":  "Search Console data unavailable — audit completed using public-site signals only.",
                 "issues":  [
-                    "🟡 Google Search Console not connected — set GSC_SITE_URL in .env and add "
-                    "the service account as a GSC property user to unlock SERP data"
+                    "🟡 Connect Google Search Console to unlock query, click, impression, and ranking insights"
                 ],
                 "strengths":          [],
                 "top_keywords":       [],
@@ -514,12 +566,42 @@ class GEOAuditor:
         elif wc >= 800:
             strengths.append(f"✅ Substantial homepage content ({wc:,} words)")
 
+        # ── Canonical tag ──────────────────────────────────────
+        if op.get("has_canonical"):
+            strengths.append("✅ Canonical tag present — prevents duplicate content signals")
+        else:
+            score -= 5
+            issues.append("🟡 No canonical tag — add <link rel='canonical'> to prevent duplicate content")
+
+        # ── Indexability ───────────────────────────────────────
+        if op.get("is_noindex"):
+            score -= 30
+            issues.append("🔴 Page has a noindex directive — search engines cannot index this page")
+        else:
+            strengths.append("✅ Page is indexable — no noindex directive detected")
+
+        # ── Social tags ────────────────────────────────────────
+        if op.get("has_og_tags"):
+            strengths.append("✅ Open Graph tags present — social sharing optimized")
+            if not op.get("has_og_image"):
+                score -= 3
+                issues.append("🟡 Missing og:image — add an image for richer social sharing previews")
+        else:
+            score -= 5
+            issues.append("🟡 No Open Graph tags — add og:title, og:description, og:image")
+        if op.get("has_twitter_card"):
+            strengths.append("✅ Twitter Card tags present")
+        else:
+            issues.append("🟡 No Twitter Card tags — add twitter:card and twitter:image for X/Twitter previews")
+
         return {
             "score":           max(20, min(100, score)),
             "status":          "pass" if score >= 65 else ("neutral" if score >= 50 else "fail"),
             "detail":          (
                 f"Title {len(title)}ch | Meta {len(meta)}ch | "
-                f"H1×{len(h1s)} H2×{len(h2s)} | {wc:,} words"
+                f"H1×{len(h1s)} H2×{len(h2s)} | {wc:,} words | "
+                f"Canonical: {'✅' if op.get('has_canonical') else '❌'} | "
+                f"OG: {'✅' if op.get('has_og_tags') else '❌'}"
             ),
             "issues":          issues,
             "strengths":       strengths,
@@ -530,6 +612,11 @@ class GEOAuditor:
             "has_faq_schema":  op.get("has_faq_schema", False),
             "schema_types":    op.get("schema_types", []),
             "word_count":      wc,
+            "canonical_url":   op.get("canonical_url", ""),
+            "is_noindex":      op.get("is_noindex", False),
+            "og_tags":         op.get("og_tags", []),
+            "has_og_image":    op.get("has_og_image", False),
+            "has_twitter_card": op.get("has_twitter_card", False),
         }
 
     # ═══════════════════════════════════════════════════════════
@@ -816,7 +903,8 @@ class GEOAuditor:
         serp_note = (
             "Ranking keywords verified in Search Console — focus on moving page-2 keywords to page 1."
             if serp_ok else
-            "Search Console not connected — add GSC_SITE_URL to .env and grant service account access."
+            "Search Console data unavailable — audit completed using public-site signals only. "
+            "Connect Google Search Console to unlock query, click, impression, and ranking insights."
         )
         return {
             "ChatGPT":            chatgpt,
@@ -897,8 +985,8 @@ class GEOAuditor:
                 "impact":   "E-E-A-T is Google AI Overview's primary source-quality filter",
             })
 
-        avg_pos = serp_det.get("avg_position") or 99
-        if serp_score < 50 or avg_pos > 20:
+        avg_pos = serp_det.get("avg_position")  # None when GSC unavailable
+        if serp_score < 50 or (avg_pos is not None and avg_pos > 20):
             recs.append({
                 "priority": "MEDIUM", "timeline": "30–60 days",
                 "action":   "Build topical content around ICP search queries",

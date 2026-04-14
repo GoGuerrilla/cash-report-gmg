@@ -409,15 +409,16 @@ class PDFReportGenerator:
         banner = Table(
             [[Paragraph("C.A.S.H. REPORT",
                         _ps("ct", fontName="Helvetica-Bold", fontSize=26,
-                            textColor=ELEC_BLUE, alignment=TA_CENTER))]],
+                            textColor=ELEC_BLUE, alignment=TA_CENTER,
+                            spaceBefore=10))]],
             colWidths=[W - 1.3*inch],
         )
         banner.setStyle(TableStyle([
             ("BACKGROUND",   (0, 0), (-1, -1), NAVY_MID),
             ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
             ("ALIGN",        (0, 0), (-1, -1), "CENTER"),
-            ("TOPPADDING",   (0, 0), (-1, -1), 18),
-            ("BOTTOMPADDING",(0, 0), (-1, -1), 18),
+            ("TOPPADDING",   (0, 0), (-1, -1), 30),
+            ("BOTTOMPADDING",(0, 0), (-1, -1), 30),
             ("LEFTPADDING",  (0, 0), (-1, -1), 14),
             ("RIGHTPADDING", (0, 0), (-1, -1), 14),
             ("BOX",          (0, 0), (-1, -1), 1, ELEC_BLUE),
@@ -437,7 +438,7 @@ class PDFReportGenerator:
         gc = _grade_color(grade)
         score_tbl = Table(
             [[Paragraph(grade, _ps("grd", fontName="Helvetica-Bold", fontSize=52,
-                                   leading=44, textColor=WHITE, alignment=TA_CENTER,
+                                   leading=52, textColor=WHITE, alignment=TA_CENTER,
                                    spaceBefore=0, spaceAfter=0)),
               Paragraph(f"OVERALL C.A.S.H. SCORE<br/><font size='30'>{score}</font>/100",
                         _ps("sc", fontName="Helvetica-Bold", fontSize=11,
@@ -450,8 +451,8 @@ class PDFReportGenerator:
             ("BACKGROUND",   (1, 0), (1, 0), NAVY_MID),
             ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
             ("ALIGN",        (0, 0), (-1, -1), "CENTER"),
-            ("TOPPADDING",   (0, 0), (0, 0),  18),
-            ("BOTTOMPADDING",(0, 0), (0, 0),  18),
+            ("TOPPADDING",   (0, 0), (0, 0),   0),
+            ("BOTTOMPADDING",(0, 0), (0, 0),   0),
             ("TOPPADDING",   (1, 0), (1, 0),   8),
             ("BOTTOMPADDING",(1, 0), (1, 0),   8),
             ("LEFTPADDING",  (0, 0), (0, 0),   4),
@@ -796,14 +797,34 @@ class PDFReportGenerator:
         seo_hdr = self._sub_hdr(f"SEO Health  —  Score: {seo.get('score',50)}/100  ({_grade(seo.get('score',50))})")
         seo_is  = self._issues_strengths(seo.get("issues",[]), seo.get("strengths",[]))
         story  += [KeepTogether(seo_hdr + seo_is)]
-        checks = [
-            ("robots.txt present",    seo.get("robots_txt",{}).get("exists",False)),
-            ("XML sitemap found",     seo.get("sitemap",{}).get("found",False)),
-            ("Canonical tags",        seo.get("canonical",{}).get("present",False)),
-            ("Open Graph tags",       seo.get("open_graph",{}).get("present",False)),
-            ("OG Image present",      seo.get("open_graph",{}).get("has_og_image",False)),
+        # Data source status
+        _seo_ds = seo.get("data_sources", {})
+        if _seo_ds:
+            story.append(self._detail_table(
+                ["DATA SOURCE", "STATUS"],
+                [
+                    ("Public Site Crawl",  _seo_ds.get("public_crawl",  "—")),
+                    ("PageSpeed API",       _seo_ds.get("pagespeed_api", "—")),
+                ],
+                col_widths=[1.8*inch, 3.9*inch]))
+        # Check table — crawl signals + legacy keys
+        _sig = seo.get("crawl_signals", {})
+
+        def _tri(val):
+            """True → ✅ Pass, False → ❌ Fail, None → — N/A."""
+            if val is True:  return "✅ Pass"
+            if val is False: return "❌ Fail"
+            return "— N/A"
+
+        seo_rows = [
+            ("robots.txt present",    _tri(seo.get("robots_txt",{}).get("exists"))),
+            ("XML sitemap found",     _tri(seo.get("sitemap",{}).get("found"))),
+            ("Canonical tag",         _tri(seo.get("canonical",{}).get("present"))),
+            ("Page indexable",        _tri(_sig.get("is_indexable", True) if _sig else None)),
+            ("Open Graph tags",       _tri(seo.get("open_graph",{}).get("present"))),
+            ("OG Image present",      _tri(seo.get("open_graph",{}).get("has_og_image"))),
+            ("Twitter Card tags",     _tri(_sig.get("has_twitter_card") if _sig else None)),
         ]
-        seo_rows = [(c, "✅ Pass" if v else "❌ Fail") for c, v in checks]
         story.append(self._detail_table(["SEO CHECK","STATUS"], seo_rows,
                                         col_widths=[3.5*inch, 1.2*inch]))
 
@@ -1168,6 +1189,18 @@ class PDFReportGenerator:
                  for n, sc in comps.items()],
                 col_widths=[2.4*inch, 0.7*inch, 0.8*inch, 0.75*inch]))
 
+        # ── Data Sources ───────────────────────────────────────
+        _geo_ds = geo.get("data_sources", {})
+        if _geo_ds:
+            story += self._sub_hdr("Audit Data Sources")
+            story.append(self._detail_table(
+                ["DATA SOURCE", "STATUS"],
+                [
+                    ("Public Site Crawl",     _geo_ds.get("public_crawl", "—")),
+                    ("Google Search Console", _geo_ds.get("gsc",          "—")),
+                ],
+                col_widths=[1.8*inch, 3.9*inch]))
+
         # ── SERP / Search Console ──────────────────────────────
         serp_kws = geo.get("serp_keywords", [])
         serp_sum = geo.get("serp_summary", {})
@@ -1201,11 +1234,10 @@ class PDFReportGenerator:
                 col_widths=[3.0*inch, 0.6*inch, 0.6*inch, 0.6*inch, 0.8*inch]))
         else:
             story += self._callout(
-                "Search Console data unavailable. To unlock SERP keyword rankings:\n"
-                "1. Go to Google Search Console → Settings → Users & permissions\n"
-                "2. Add the service account email as a Full user\n"
-                "3. Set GSC_SITE_URL in .env to match your verified property URL\n"
-                "   (e.g. GSC_SITE_URL=https://goguerrilla.xyz/)",
+                "Search Console data unavailable — audit completed using public-site signals only.\n\n"
+                "Connect Google Search Console to unlock query, click, impression, and ranking "
+                "insights. Once connected, full keyword rankings and 90-day click data will "
+                "appear in this section.",
                 AMBER_BG)
 
         # ── On-page SEO ────────────────────────────────────────
@@ -1243,6 +1275,30 @@ class PDFReportGenerator:
 
         if op.get("word_count"):
             onpage_rows.append(("Homepage Word Count", f"{op['word_count']:,} words"))
+
+        # ── Extended crawl signals ─────────────────────────────
+        _canon = op.get("canonical_url", "")
+        if _canon:
+            onpage_rows.append(("Canonical Tag", f"✅ {_canon[:60]}{'…' if len(_canon) > 60 else ''}"))
+        else:
+            onpage_rows.append(("Canonical Tag", "🟡 Missing — add <link rel='canonical'>"))
+
+        if op.get("is_noindex"):
+            onpage_rows.append(("Indexability", "🔴 noindex directive found — excluded from search engines"))
+        else:
+            onpage_rows.append(("Indexability", "✅ Indexable"))
+
+        _has_og    = op.get("og_tags") or op.get("has_og_image")
+        _has_ogimg = op.get("has_og_image", False)
+        if _has_og and _has_ogimg:
+            onpage_rows.append(("Open Graph", "✅ Present with og:image"))
+        elif _has_og:
+            onpage_rows.append(("Open Graph", "🟡 Tags present — missing og:image"))
+        else:
+            onpage_rows.append(("Open Graph", "🟡 No Open Graph tags"))
+
+        onpage_rows.append(("Twitter Card",
+            "✅ Present" if op.get("has_twitter_card") else "🟡 Missing — add twitter:card"))
 
         if onpage_rows:
             story.append(self._detail_table(
