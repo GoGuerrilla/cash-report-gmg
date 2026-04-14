@@ -12,17 +12,30 @@ Data Sources
                              XML sitemap, robots.txt
   PageSpeed API (optional) — Lighthouse SEO / performance / accessibility scores,
                              Core Web Vitals, individual audit pass/fail results
+
+Compatibility
+─────────────
+  Uses scrape_utils.fetch_url() which retries with a Googlebot UA on
+  403/429/503 responses — handles Wix, Squarespace, Shopify, WordPress,
+  and Cloudflare-protected sites.  extract_schema() handles all JSON-LD
+  formats (single, array, @graph, nested, @type-as-list).
 """
-import json
 from urllib.parse import urlparse
 from typing import Dict, Any, List, Optional
 
 try:
     import requests
-    from bs4 import BeautifulSoup
     REQUESTS_OK = True
 except ImportError:
     REQUESTS_OK = False
+
+from auditors.scrape_utils import (
+    fetch_url, parse_html, detect_platform,
+    extract_schema,
+    get_title, get_meta_description, get_canonical,
+    get_og_tags, get_twitter_card, get_robots_meta,
+    get_headings, get_word_count,
+)
 
 PAGESPEED_ENDPOINT = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
 
@@ -51,20 +64,12 @@ def _grade(score: int) -> str:
 
 class SEOAuditor:
     def __init__(self, url: str, api_key: str = ""):
-        self.base_url = url.rstrip("/")
-        self.domain   = urlparse(url).netloc
-        self.api_key  = api_key
-        self.headers  = {
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/122.0.0.0 Safari/537.36"
-            ),
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-        }
-        self._homepage_soup: Optional[Any] = None  # cached BeautifulSoup object
+        self.base_url        = url.rstrip("/")
+        self.domain          = urlparse(url).netloc
+        self.api_key         = api_key
+        self._homepage_soup: Optional[Any] = None   # cached BeautifulSoup object
         self._homepage_ok:   Optional[bool] = None  # True = reachable, False = not
+        self._platform:      str = "unknown"        # detected CMS platform
 
     # ─────────────────────────────────────────────────────────────
     #  Public entry point
@@ -149,94 +154,59 @@ class SEOAuditor:
 
     def _fetch_and_parse_homepage(self) -> Optional[Dict]:
         """
-        Fetch homepage once and extract all on-page signals.
-        Caches parsed soup — subsequent calls within the same audit are free.
-        Returns None if the site is unreachable.
+        Fetch homepage once and extract all on-page signals using shared utilities.
+
+        Uses scrape_utils.fetch_url() which retries with a Googlebot UA on
+        403/429/503 — handles Wix Cloudflare, Squarespace, Shopify, WordPress.
+        Caches parsed soup so subsequent calls in the same audit run are free.
+        Returns None if site is unreachable; returns {} if REQUESTS_OK is False.
         """
         if self._homepage_ok is False:
             return None
 
-        text, status = self._fetch(self.base_url)
-        if not text or status == 0:
+        html, status = fetch_url(self.base_url)
+        if not html or status == 0:
             self._homepage_ok = False
             return None
 
         self._homepage_ok = True
-        if not REQUESTS_OK:
+        soup = parse_html(html)
+        if not soup:
             return {}
 
-        soup = BeautifulSoup(text, "html.parser")
         self._homepage_soup = soup
+        self._platform = detect_platform(soup, html)
 
-        # ── Title tag ───────────────────────────────────────────
-        title_tag = soup.find("title")
-        title = title_tag.get_text().strip() if title_tag else ""
-
-        # ── Meta description ────────────────────────────────────
-        meta_tag = soup.find("meta", attrs={"name": lambda x: x and x.lower() == "description"})
-        meta_desc = (meta_tag.get("content") or "").strip() if meta_tag else ""
-
-        # ── H1 / H2 headings ────────────────────────────────────
-        h1s = [h.get_text().strip() for h in soup.find_all("h1") if h.get_text().strip()]
-        h2s = [h.get_text().strip() for h in soup.find_all("h2") if h.get_text().strip()][:8]
-
-        # ── Canonical tag ────────────────────────────────────────
-        canon_tag = soup.find("link", rel="canonical")
-        canonical_url = canon_tag.get("href", "").strip() if canon_tag else ""
-
-        # ── Indexability — meta robots noindex check ─────────────
-        robots_meta = soup.find("meta", attrs={"name": lambda x: x and x.lower() == "robots"})
-        robots_content = (robots_meta.get("content") or "").lower() if robots_meta else ""
-        is_indexable = "noindex" not in robots_content
-
-        # ── Open Graph tags ──────────────────────────────────────
-        og_tags = soup.find_all(
-            "meta", attrs={"property": lambda x: x and x.startswith("og:")}
-        )
-        og_list = [t.get("property", "") for t in og_tags]
-
-        # ── Twitter Card tags ────────────────────────────────────
-        tw_tags = soup.find_all(
-            "meta", attrs={"name": lambda x: x and x.lower().startswith("twitter:")}
-        )
-        tw_list = [t.get("name", "") for t in tw_tags]
-
-        # ── Schema markup (JSON-LD) ──────────────────────────────
-        schema_types: List[str] = []
-        has_schema = False
-        for script in soup.find_all("script", type="application/ld+json"):
-            try:
-                data = json.loads(script.string or "")
-            except (ValueError, TypeError):
-                continue
-            items = data if isinstance(data, list) else [data]
-            for item in items:
-                t = item.get("@type", "")
-                if t:
-                    schema_types.append(t)
-                    has_schema = True
-                for sub in item.get("@graph", []):
-                    st = sub.get("@type", "")
-                    if st:
-                        schema_types.append(st)
-                        has_schema = True
+        # ── All signals via shared, robust extractors ────────────
+        title       = get_title(soup)
+        meta_desc   = get_meta_description(soup)
+        headings    = get_headings(soup, self._platform)
+        canonical   = get_canonical(soup)
+        robots      = get_robots_meta(soup)
+        og          = get_og_tags(soup)
+        twitter     = get_twitter_card(soup)
+        schema_types, has_faq = extract_schema(soup)
+        wc          = get_word_count(soup)
 
         return {
             "title":            title,
             "meta_description": meta_desc,
-            "h1s":              h1s,
-            "h2s":              h2s,
-            "canonical_url":    canonical_url,
-            "has_canonical":    bool(canonical_url),
-            "is_indexable":     is_indexable,
-            "og_tags":          og_list,
-            "has_og_tags":      len(og_list) > 0,
-            "has_og_image":     any("og:image" in t for t in og_list),
-            "has_og_title":     any("og:title" in t for t in og_list),
-            "twitter_tags":     tw_list,
-            "has_twitter_card": len(tw_list) > 0,
+            "h1s":              headings["h1s"],
+            "h2s":              headings["h2s"],
+            "canonical_url":    canonical,
+            "has_canonical":    bool(canonical),
+            "is_indexable":     robots["is_indexable"],
+            "og_tags":          og["tags"],
+            "has_og_tags":      og["present"] or False,
+            "has_og_image":     og["has_og_image"],
+            "has_og_title":     og["has_og_title"],
+            "twitter_tags":     twitter["tags"],
+            "has_twitter_card": twitter["present"] or False,
             "schema_types":     schema_types,
-            "has_schema":       has_schema,
+            "has_schema":       len(schema_types) > 0,
+            "has_faq_schema":   has_faq,
+            "word_count":       wc,
+            "platform":         self._platform,
         }
 
     def _evaluate_public_crawl(
@@ -534,21 +504,16 @@ class SEOAuditor:
         return {"exists": robots_passed, "sitemap_referenced": sitemap_ref}
 
     # ─────────────────────────────────────────────────────────────
-    #  Helpers
+    #  Helpers — all fetches use scrape_utils.fetch_url() with retry
     # ─────────────────────────────────────────────────────────────
 
     def _fetch(self, url: str) -> tuple:
-        if not REQUESTS_OK:
-            return None, 0
-        try:
-            r = requests.get(url, headers=self.headers, timeout=12, allow_redirects=True)
-            return r.text, r.status_code
-        except Exception:
-            return None, 0
+        """Thin wrapper around scrape_utils.fetch_url() for internal callers."""
+        return fetch_url(url)
 
     def _check_robots_txt(self) -> Dict:
         url = f"{self.base_url}/robots.txt"
-        text, status = self._fetch(url)
+        text, status = fetch_url(url)
         if status == 0 or text is None:
             return {"url": url, "exists": None, "status_code": status, "sitemap_referenced": False}
         exists = status == 200 and "user-agent" in text.lower()
@@ -560,7 +525,7 @@ class SEOAuditor:
     def _check_sitemap(self) -> Dict:
         for path in ["/sitemap.xml", "/sitemap_index.xml", "/sitemap/", "/sitemap1.xml"]:
             url = f"{self.base_url}{path}"
-            text, status = self._fetch(url)
+            text, status = fetch_url(url)
             if status == 0 or text is None:
                 continue
             if status == 200 and text:
@@ -570,38 +535,25 @@ class SEOAuditor:
 
     def _check_canonical(self) -> Dict:
         """Legacy helper — canonical now extracted in _fetch_and_parse_homepage."""
+        canon = get_canonical(self._homepage_soup) if self._homepage_soup else ""
         if self._homepage_soup:
-            tag = self._homepage_soup.find("link", rel="canonical")
-            if tag:
-                return {"present": True, "value": tag.get("href", "")}
-            return {"present": False, "value": None}
-        text, status = self._fetch(self.base_url)
-        if not text or status == 0:
+            return {"present": bool(canon), "value": canon or None}
+        html, status = fetch_url(self.base_url)
+        if not html or status == 0:
             return {"present": None, "value": None}
-        if not REQUESTS_OK:
-            return {"present": None, "value": None}
-        soup = BeautifulSoup(text, "html.parser")
-        tag = soup.find("link", rel="canonical")
-        if tag:
-            return {"present": True, "value": tag.get("href", "")}
-        return {"present": False, "value": None}
+        soup = parse_html(html)
+        canon = get_canonical(soup)
+        return {"present": bool(canon), "value": canon or None}
 
     def _check_open_graph(self) -> Dict:
         """Legacy helper — OG tags now extracted in _fetch_and_parse_homepage."""
         soup = self._homepage_soup
         if not soup:
-            text, status = self._fetch(self.base_url)
-            if not text or status == 0 or not REQUESTS_OK:
+            html, status = fetch_url(self.base_url)
+            if not html or status == 0:
                 return {"present": None, "tags": []}
-            soup = BeautifulSoup(text, "html.parser")
-        og_tags  = soup.find_all("meta", attrs={"property": lambda x: x and x.startswith("og:")})
-        tag_list = [t.get("property") or t.get("name") for t in og_tags]
-        return {
-            "present":      len(og_tags) > 0,
-            "tags":         tag_list,
-            "has_og_image": any("og:image" in t for t in tag_list),
-            "has_og_title": any("og:title" in t for t in tag_list),
-        }
+            soup = parse_html(html)
+        return get_og_tags(soup)
 
     # ─────────────────────────────────────────────────────────────
     #  Legacy aliases (kept for callers that reference them)

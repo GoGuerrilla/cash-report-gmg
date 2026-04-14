@@ -33,11 +33,17 @@ from datetime import date, timedelta
 from typing import Dict, Any, List, Optional, Tuple
 
 from config import ClientConfig
+from auditors.scrape_utils import (
+    fetch_url, parse_html, detect_platform,
+    extract_schema,
+    get_title, get_meta_description, get_canonical,
+    get_og_tags, get_twitter_card, get_robots_meta,
+    get_headings, get_word_count,
+)
 
 # ── Optional third-party imports ──────────────────────────────
 try:
     import requests
-    from bs4 import BeautifulSoup
     REQUESTS_OK = True
 except ImportError:
     REQUESTS_OK = False
@@ -48,15 +54,6 @@ try:
     GOOGLE_AUTH_OK = True
 except ImportError:
     GOOGLE_AUTH_OK = False
-
-# ── Constants ──────────────────────────────────────────────────
-_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    )
-}
 
 _STOPWORDS = {
     "and", "or", "the", "a", "an", "in", "at", "for", "of", "to", "with",
@@ -214,92 +211,56 @@ class GEOAuditor:
     # ═══════════════════════════════════════════════════════════
 
     def _scrape_homepage(self) -> Dict:
+        """
+        Fetch and parse the client homepage using scrape_utils shared utilities.
+
+        Uses fetch_url() which retries with a Googlebot UA on 403/429/503
+        so it works on Wix, Squarespace, Shopify, WordPress, and Cloudflare
+        protected sites.  extract_schema() handles all JSON-LD formats.
+        Returns {} (not raises) on any error — caller treats as neutral 50.
+        """
         url = self.config.website_url
-        if not url or not REQUESTS_OK:
+        if not url:
             return {}
         try:
-            r = requests.get(url, headers=_HEADERS, timeout=15, allow_redirects=True)
-            if r.status_code >= 400:
+            html, status = fetch_url(url)
+            if not html or status == 0 or status >= 400:
                 return {}
-            soup = BeautifulSoup(r.text, "html.parser")
 
-            # Title tag
-            title_tag = soup.find("title")
-            title = title_tag.get_text().strip() if title_tag else ""
+            soup = parse_html(html)
+            if not soup:
+                return {}
 
-            # Meta description
-            meta_tag = soup.find("meta", attrs={"name": re.compile("^description$", re.I)})
-            meta_desc = (meta_tag.get("content") or "").strip() if meta_tag else ""
+            platform = detect_platform(soup, html)
 
-            # H1 / H2 headings
-            h1s = [h.get_text().strip() for h in soup.find_all("h1") if h.get_text().strip()]
-            h2s = [h.get_text().strip() for h in soup.find_all("h2") if h.get_text().strip()][:12]
-
-            # JSON-LD structured data
-            scripts = soup.find_all("script", type="application/ld+json")
-            schema_types: List[str] = []
-            has_faq_schema = False
-            for tag in scripts:
-                try:
-                    data = json.loads(tag.string or "")
-                except (json.JSONDecodeError, TypeError):
-                    continue
-                items = data if isinstance(data, list) else [data]
-                for item in items:
-                    t = item.get("@type", "")
-                    if t:
-                        schema_types.append(t)
-                    if t == "FAQPage":
-                        has_faq_schema = True
-                    # Also catch @graph arrays
-                    for sub in item.get("@graph", []):
-                        st = sub.get("@type", "")
-                        if st:
-                            schema_types.append(st)
-                        if st == "FAQPage":
-                            has_faq_schema = True
-
-            # Word count
-            word_count = len(re.findall(r"\b\w+\b", soup.get_text(separator=" ")))
-
-            # Canonical tag
-            canon_tag = soup.find("link", rel="canonical")
-            canonical_url = canon_tag.get("href", "").strip() if canon_tag else ""
-
-            # Indexability — meta robots noindex check
-            robots_meta = soup.find("meta", attrs={"name": re.compile("^robots$", re.I)})
-            robots_content = (robots_meta.get("content") or "").lower() if robots_meta else ""
-            is_noindex = "noindex" in robots_content
-
-            # Open Graph tags
-            og_tags = soup.find_all(
-                "meta", attrs={"property": lambda x: x and x.startswith("og:")}
-            )
-            og_list = [t.get("property", "") for t in og_tags]
-
-            # Twitter Card tags
-            tw_tags = soup.find_all(
-                "meta", attrs={"name": lambda x: x and x.lower().startswith("twitter:")}
-            )
-            tw_list = [t.get("name", "") for t in tw_tags]
+            title        = get_title(soup)
+            meta_desc    = get_meta_description(soup)
+            headings     = get_headings(soup, platform)
+            canonical    = get_canonical(soup)
+            robots       = get_robots_meta(soup)
+            og           = get_og_tags(soup)
+            twitter      = get_twitter_card(soup)
+            schema_types, has_faq_schema = extract_schema(soup)
+            word_count   = get_word_count(soup)
 
             return {
-                "title":              title,
-                "meta_description":   meta_desc,
-                "h1s":                h1s,
-                "h2s":                h2s,
-                "schema_types":       schema_types,
-                "has_faq_schema":     has_faq_schema,
-                "word_count":         word_count,
-                "canonical_url":      canonical_url,
-                "has_canonical":      bool(canonical_url),
-                "is_noindex":         is_noindex,
-                "og_tags":            og_list,
-                "has_og_tags":        len(og_list) > 0,
-                "has_og_image":       any("og:image" in t for t in og_list),
-                "has_og_title":       any("og:title" in t for t in og_list),
-                "twitter_tags":       tw_list,
-                "has_twitter_card":   len(tw_list) > 0,
+                "title":            title,
+                "meta_description": meta_desc,
+                "h1s":              headings["h1s"],
+                "h2s":              headings["h2s"],
+                "schema_types":     schema_types,
+                "has_faq_schema":   has_faq_schema,
+                "word_count":       word_count,
+                "canonical_url":    canonical,
+                "has_canonical":    bool(canonical),
+                "is_noindex":       not robots["is_indexable"],
+                "og_tags":          og["tags"],
+                "has_og_tags":      og["present"] or False,
+                "has_og_image":     og["has_og_image"],
+                "has_og_title":     og["has_og_title"],
+                "twitter_tags":     twitter["tags"],
+                "has_twitter_card": twitter["present"] or False,
+                "platform":         platform,
             }
         except Exception:
             return {}
