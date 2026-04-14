@@ -414,8 +414,10 @@ class PDFReportGenerator:
         )
         banner.setStyle(TableStyle([
             ("BACKGROUND",   (0, 0), (-1, -1), NAVY_MID),
-            ("TOPPADDING",   (0, 0), (-1, -1), 14),
-            ("BOTTOMPADDING",(0, 0), (-1, -1), 14),
+            ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
+            ("ALIGN",        (0, 0), (-1, -1), "CENTER"),
+            ("TOPPADDING",   (0, 0), (-1, -1), 18),
+            ("BOTTOMPADDING",(0, 0), (-1, -1), 18),
             ("LEFTPADDING",  (0, 0), (-1, -1), 14),
             ("RIGHTPADDING", (0, 0), (-1, -1), 14),
             ("BOX",          (0, 0), (-1, -1), 1, ELEC_BLUE),
@@ -435,7 +437,7 @@ class PDFReportGenerator:
         gc = _grade_color(grade)
         score_tbl = Table(
             [[Paragraph(grade, _ps("grd", fontName="Helvetica-Bold", fontSize=52,
-                                   leading=52, textColor=WHITE, alignment=TA_CENTER,
+                                   leading=44, textColor=WHITE, alignment=TA_CENTER,
                                    spaceBefore=0, spaceAfter=0)),
               Paragraph(f"OVERALL C.A.S.H. SCORE<br/><font size='30'>{score}</font>/100",
                         _ps("sc", fontName="Helvetica-Bold", fontSize=11,
@@ -448,8 +450,10 @@ class PDFReportGenerator:
             ("BACKGROUND",   (1, 0), (1, 0), NAVY_MID),
             ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
             ("ALIGN",        (0, 0), (-1, -1), "CENTER"),
-            ("TOPPADDING",   (0, 0), (-1, -1), 0),
-            ("BOTTOMPADDING",(0, 0), (-1, -1), 0),
+            ("TOPPADDING",   (0, 0), (0, 0),  18),
+            ("BOTTOMPADDING",(0, 0), (0, 0),  18),
+            ("TOPPADDING",   (1, 0), (1, 0),   8),
+            ("BOTTOMPADDING",(1, 0), (1, 0),   8),
             ("LEFTPADDING",  (0, 0), (0, 0),   4),
             ("RIGHTPADDING", (0, 0), (0, 0),   4),
             ("LEFTPADDING",  (1, 0), (1, 0),  12),
@@ -765,7 +769,7 @@ class PDFReportGenerator:
                 [(str(p.get("priority", i+1)), p.get("action",""),
                   p.get("impact",""), p.get("timeline",""))
                  for i, p in enumerate(priorities[:3])],
-                col_widths=[0.3*inch, 2.5*inch, 2.5*inch, 0.65*inch]))
+                col_widths=[0.3*inch, 2.2*inch, 2.1*inch, 1.2*inch]))
 
         verdict = ai.get("icp_alignment_verdict","") or self.data.get("icp",{}).get("icp_verdict","")
         if verdict:
@@ -816,10 +820,13 @@ class PDFReportGenerator:
                                         col_widths=[1.8*inch, 3.5*inch]))
         story += self._issues_strengths(web.get("issues",[]), web.get("strengths",[]))
 
-        # Brand
+        # Brand — keep header + content together on same page
         brand = self.data.get("brand",{})
-        story += self._sub_hdr(f"Brand Consistency  —  Score: {brand.get('score',50)}/100")
-        story += self._issues_strengths(brand.get("issues",[]), brand.get("strengths",[]))
+        brand_block = (
+            self._sub_hdr(f"Brand Consistency  —  Score: {brand.get('score',50)}/100") +
+            self._issues_strengths(brand.get("issues",[]), brand.get("strengths",[]))
+        )
+        story += [KeepTogether(brand_block)]
 
         # Freshness — overlay Meta live data source labels
         fresh     = self.data.get("freshness",{})
@@ -952,7 +959,7 @@ class PDFReportGenerator:
                     [(r.get("platform",""), r.get("priority",""),
                       r.get("action",""), r.get("detail",""),
                       r.get("timeline","")) for r in meta_recs],
-                    col_widths=[0.8*inch, 0.7*inch, 1.5*inch, 2.0*inch, 0.75*inch]))
+                    col_widths=[0.8*inch, 0.9*inch, 1.45*inch, 1.85*inch, 1.0*inch]))
 
         elif meta:
             # Tier 1 only — FB public data available, no Page token for insights/IG
@@ -995,7 +1002,7 @@ class PDFReportGenerator:
                     [(r.get("platform",""), r.get("priority",""),
                       r.get("action",""), r.get("detail",""),
                       r.get("timeline","")) for r in meta_recs],
-                    col_widths=[0.8*inch, 0.7*inch, 1.5*inch, 2.0*inch, 0.75*inch]))
+                    col_widths=[0.8*inch, 0.9*inch, 1.45*inch, 1.85*inch, 1.0*inch]))
 
         recs = icp.get("recommendations",[])
         if recs:
@@ -1004,7 +1011,7 @@ class PDFReportGenerator:
                 ["PRIORITY","ACTION","DETAIL","TIMELINE"],
                 [(r.get("priority",""), r.get("action",""),
                   r.get("detail",""), r.get("timeline","")) for r in recs],
-                col_widths=[0.7*inch, 1.8*inch, 2.5*inch, 0.75*inch]))
+                col_widths=[0.9*inch, 1.8*inch, 2.3*inch, 1.0*inch]))
 
         cr = self.ai.get("channel_recommendation","")
         if cr:
@@ -1052,7 +1059,7 @@ class PDFReportGenerator:
                 ["PRIORITY","ACTION","DETAIL","TIMELINE"],
                 [(r.get("priority",""), r.get("action",""),
                   r.get("example", r.get("detail","")), r.get("timeline","")) for r in recs],
-                col_widths=[0.65*inch, 1.9*inch, 2.5*inch, 0.75*inch]))
+                col_widths=[0.9*inch, 1.85*inch, 2.25*inch, 1.0*inch]))
 
         br = self.ai.get("budget_recommendation","")
         if br:
@@ -1129,7 +1136,7 @@ class PDFReportGenerator:
         ]
         story.append(self._detail_table(
             ["PRIORITY","ACTION","DETAIL","TIMELINE"],
-            hold_recs, col_widths=[0.65*inch, 2.0*inch, 2.5*inch, 0.6*inch]))
+            hold_recs, col_widths=[0.9*inch, 1.9*inch, 2.2*inch, 1.0*inch]))
         return story
 
     # ══════════════════════════════════════════════════════════
@@ -1262,7 +1269,7 @@ class PDFReportGenerator:
                 ["PRIORITY", "ACTION", "IMPACT", "TIMELINE"],
                 [(r.get("priority",""), r.get("action",""),
                   r.get("impact",""), r.get("timeline","")) for r in recs],
-                col_widths=[0.7*inch, 2.0*inch, 2.4*inch, 0.65*inch]))
+                col_widths=[0.9*inch, 2.0*inch, 2.1*inch, 1.0*inch]))
 
         # ── Google Business Profile ────────────────────────────
         gbp = self.data.get("gbp", {})
@@ -1406,7 +1413,7 @@ class PDFReportGenerator:
                     rows.append(("—", str(item), "", ""))
             story.append(self._detail_table(
                 ["PHASE", "ACTION", "EXPECTED OUTCOME", "TIMELINE"],
-                rows, col_widths=[0.7*inch, 2.3*inch, 2.3*inch, 0.65*inch]))
+                rows, col_widths=[0.7*inch, 2.2*inch, 2.1*inch, 1.0*inch]))
         else:
             priorities = self.ai.get("top_3_priorities",[])
             if priorities:
@@ -1415,7 +1422,7 @@ class PDFReportGenerator:
                     [(str(p.get("priority",i+1)), p.get("action",""),
                       p.get("impact",""), p.get("timeline",""))
                      for i,p in enumerate(priorities)],
-                    col_widths=[0.65*inch, 2.5*inch, 2.3*inch, 0.55*inch]))
+                    col_widths=[0.9*inch, 2.2*inch, 1.9*inch, 1.0*inch]))
 
         return story
 
