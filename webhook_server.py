@@ -705,6 +705,22 @@ def _verify_typeform_signature(raw_body: bytes, header: str, secret: str) -> boo
 
 
 # ══════════════════════════════════════════════════════════════════
+#  CORS
+# ══════════════════════════════════════════════════════════════════
+
+CORS_HEADERS = {
+    "Access-Control-Allow-Origin":  "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+}
+
+def _add_cors(response):
+    for k, v in CORS_HEADERS.items():
+        response.headers[k] = v
+    return response
+
+
+# ══════════════════════════════════════════════════════════════════
 #  FLASK ROUTES
 # ══════════════════════════════════════════════════════════════════
 
@@ -820,6 +836,12 @@ def webhook():
 #  WIX FORM ENDPOINT
 # ══════════════════════════════════════════════════════════════════
 
+@app.route("/cash-report", methods=["OPTIONS"])
+def cash_report_preflight():
+    """Handle CORS preflight requests from browsers."""
+    return _add_cors(app.response_class(status=204))
+
+
 @app.route("/cash-report", methods=["POST"])
 def cash_report():
     """
@@ -836,7 +858,7 @@ def cash_report():
         data = None
 
     if not data:
-        return jsonify({"success": False, "message": "Invalid or missing JSON body"}), 400
+        return _add_cors(jsonify({"success": False, "message": "Invalid or missing JSON body"})), 400
 
     # Map Wix field names → internal parsed-field dict
     parsed = {
@@ -854,7 +876,7 @@ def cash_report():
     }
 
     if not parsed["contact_email"]:
-        return jsonify({"success": False, "message": "contact_email is required"}), 422
+        return _add_cors(jsonify({"success": False, "message": "contact_email is required"})), 422
 
     log.info("Wix form submission — email=%s  business=%r",
              parsed["contact_email"], parsed["business_name"])
@@ -863,7 +885,7 @@ def cash_report():
         config = build_config_from_parsed(parsed)
     except Exception as e:
         log.error("Config build failed for Wix submission: %s", e)
-        return jsonify({"success": False, "message": "Submission failed"}), 500
+        return _add_cors(jsonify({"success": False, "message": "Submission failed"})), 500
 
     contact_email = config.contact_email
     website_url   = config.website_url or config.linktree_url
@@ -880,7 +902,7 @@ def cash_report():
     if not allowed:
         log.info("Rate limit blocked Wix submission: %s", contact_email)
         _send_rejection_email(contact_email, config.client_name, reason)
-        return jsonify({"success": False, "message": "Too many submissions. Please try again later."}), 429
+        return _add_cors(jsonify({"success": False, "message": "Too many submissions. Please try again later."})), 429
 
     # Launch audit in background thread
     token = f"wix-{contact_email}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
@@ -893,7 +915,7 @@ def cash_report():
     t.start()
     log.info("Wix audit thread launched — client=%r  email=%s", config.client_name, contact_email)
 
-    return jsonify({"success": True, "message": "Report request received"}), 202
+    return _add_cors(jsonify({"success": True, "message": "Report request received"})), 202
 
 
 # ══════════════════════════════════════════════════════════════════
