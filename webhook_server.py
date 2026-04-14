@@ -652,8 +652,15 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
     pdf_path = os.path.abspath(f"reports/{slug}_cash_report.pdf")
 
     log.info("Generating PDF: %s", pdf_path)
-    PDFReportGenerator(config, audit_data).generate(pdf_path)
-    log.info("PDF saved: %s", pdf_path)
+    try:
+        PDFReportGenerator(config, audit_data).generate(pdf_path)
+        if os.path.isfile(pdf_path):
+            log.info("PDF saved: %s (%d bytes)", pdf_path, os.path.getsize(pdf_path))
+        else:
+            log.error("PDF generation ran but file not found at: %s", pdf_path)
+    except Exception as pdf_err:
+        log.error("PDF generation failed: %s", pdf_err)
+        pdf_path = None
 
     # ── Generate DOCX backup ──────────────────────────────────────
     docx_path = os.path.abspath(f"reports/{slug}_cash_report.docx")
@@ -661,31 +668,46 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
         DocxReportGenerator(config, audit_data).generate(docx_path)
         log.info("DOCX backup saved: %s", docx_path)
     except Exception as e:
-        log.warning("DOCX backup failed: %s", e)
+        log.warning("DOCX backup failed (non-fatal): %s", e)
 
     # ── Email report ──────────────────────────────────────────────
+    log.info("=== EMAIL DELIVERY ===")
+    log.info("SENDGRID_API_KEY   : %s",
+             f"set ({len(os.environ.get('SENDGRID_API_KEY',''))} chars)"
+             if os.environ.get("SENDGRID_API_KEY") else "NOT SET")
+    log.info("SENDGRID_FROM_EMAIL: %s",
+             os.environ.get("SENDGRID_FROM_EMAIL") or "NOT SET")
+    log.info("REPORT_EMAIL_FROM  : %s",
+             os.environ.get("REPORT_EMAIL_FROM") or "NOT SET")
+    log.info("REPORT_EMAIL_TO    : %s",
+             os.environ.get("REPORT_EMAIL_TO") or "NOT SET")
+    log.info("PDF for attachment : %s  exists=%s",
+             pdf_path, os.path.isfile(pdf_path) if pdf_path else False)
+
     # 1. Send to the client
     if contact_email:
-        log.info("Emailing report to client: %s", contact_email)
-        send_report(
+        log.info("Sending report to client: %s", contact_email)
+        ok = send_report(
             report_path   = pdf_path,
             client_name   = name,
             overall_score = overall_score,
             overall_grade = overall_grade,
             to_addr       = contact_email,
         )
+        log.info("Client email result: %s", "SUCCESS" if ok else "FAILED")
 
     # 2. Always send a copy to the GMG team inbox
     gmg_inbox = os.environ.get("REPORT_EMAIL_TO", "")
     if gmg_inbox and gmg_inbox != contact_email:
-        log.info("Emailing copy to GMG team: %s", gmg_inbox)
-        send_report(
+        log.info("Sending copy to GMG team: %s", gmg_inbox)
+        ok2 = send_report(
             report_path   = pdf_path,
             client_name   = name,
             overall_score = overall_score,
             overall_grade = overall_grade,
             to_addr       = gmg_inbox,
         )
+        log.info("GMG team email result: %s", "SUCCESS" if ok2 else "FAILED")
 
     # ── Save to DB ────────────────────────────────────────────────
     log.info("Saving to cash_clients.db...")

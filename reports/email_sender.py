@@ -1,7 +1,7 @@
 """
 C.A.S.H. Report — Email Delivery (SendGrid primary, Gmail SMTP fallback)
 
-Required .env variables
+Required env variables
 -----------------------
   SENDGRID_API_KEY       SendGrid API key (primary delivery method)
   SENDGRID_FROM_EMAIL    Verified sender address (e.g. cash-report@gogmg.net)
@@ -21,10 +21,11 @@ Behaviour
 ---------
   - Tries SendGrid first if SENDGRID_API_KEY is set
   - Falls back to Gmail SMTP if SendGrid key is absent
-  - If neither is configured → skips silently, returns False
+  - If neither is configured → logs clearly and returns False
   - Never raises — always returns True/False
 """
 import base64
+import logging
 import os
 import smtplib
 import ssl
@@ -34,6 +35,8 @@ from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional
+
+log = logging.getLogger("webhook")
 
 
 def _body_text(client_name: str, overall_score, overall_grade) -> str:
@@ -75,6 +78,8 @@ def _send_sendgrid(
     import urllib.error
     import json
 
+    log.info("SendGrid: preparing email from=%s to=%s subject=%r", from_addr, to_addr, subject)
+
     content = [{"type": "text/plain", "value": body}]
     payload: dict = {
         "personalizations": [{"to": [{"email": to_addr}]}],
@@ -85,20 +90,29 @@ def _send_sendgrid(
 
     attachments = []
     for path in [report_path, teaser_path]:
-        if path and os.path.isfile(path):
-            with open(path, "rb") as f:
-                encoded = base64.b64encode(f.read()).decode()
-            attachments.append({
-                "content":     encoded,
-                "filename":    os.path.basename(path),
-                "type":        "application/pdf",
-                "disposition": "attachment",
-            })
+        if path:
+            if os.path.isfile(path):
+                size = os.path.getsize(path)
+                log.info("SendGrid: attaching %s (%d bytes)", path, size)
+                with open(path, "rb") as f:
+                    encoded = base64.b64encode(f.read()).decode()
+                attachments.append({
+                    "content":     encoded,
+                    "filename":    os.path.basename(path),
+                    "type":        "application/pdf",
+                    "disposition": "attachment",
+                })
+            else:
+                log.warning("SendGrid: attachment not found — skipping: %s", path)
+
     if attachments:
         payload["attachments"] = attachments
+        log.info("SendGrid: %d attachment(s) included", len(attachments))
+    else:
+        log.warning("SendGrid: sending with NO attachments — no PDF files found")
 
-    data    = json.dumps(payload).encode("utf-8")
-    req     = urllib.request.Request(
+    data = json.dumps(payload).encode("utf-8")
+    req  = urllib.request.Request(
         "https://api.sendgrid.com/v3/mail/send",
         data=data,
         headers={
@@ -108,18 +122,20 @@ def _send_sendgrid(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            if resp.status in (200, 202):
-                print(f"  ✅  Report emailed via SendGrid → {to_addr}")
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            status = resp.status
+            log.info("SendGrid: API response status=%d", status)
+            if status in (200, 202):
+                log.info("SendGrid: email delivered successfully → %s", to_addr)
                 return True
-            print(f"  ⚠️  SendGrid returned status {resp.status}")
+            log.warning("SendGrid: unexpected status %d", status)
             return False
     except urllib.error.HTTPError as e:
         body_err = e.read().decode("utf-8", errors="replace")
-        print(f"  ⚠️  SendGrid HTTP {e.code}: {body_err[:200]}")
+        log.error("SendGrid: HTTP %d error: %s", e.code, body_err[:500])
         return False
     except Exception as exc:
-        print(f"  ⚠️  SendGrid failed: {exc}")
+        log.error("SendGrid: unexpected error: %s", exc)
         return False
 
 
@@ -131,6 +147,9 @@ def _send_smtp(
     teaser_path: Optional[str] = None,
 ) -> bool:
     """Send via Gmail SMTP (STARTTLS on 587, SSL on 465)."""
+    log.info("SMTP: preparing email from=%s to=%s host=%s:%d",
+             from_addr, to_addr, smtp_host, smtp_port)
+
     msg = MIMEMultipart()
     msg["From"]    = from_addr
     msg["To"]      = to_addr
@@ -138,14 +157,18 @@ def _send_smtp(
     msg.attach(MIMEText(body, "plain"))
 
     for path in [report_path, teaser_path]:
-        if path and os.path.isfile(path):
-            with open(path, "rb") as f:
-                part = MIMEBase("application", "octet-stream")
-                part.set_payload(f.read())
-            encoders.encode_base64(part)
-            part.add_header("Content-Disposition",
-                            f'attachment; filename="{os.path.basename(path)}"')
-            msg.attach(part)
+        if path:
+            if os.path.isfile(path):
+                log.info("SMTP: attaching %s (%d bytes)", path, os.path.getsize(path))
+                with open(path, "rb") as f:
+                    part = MIMEBase("application", "octet-stream")
+                    part.set_payload(f.read())
+                encoders.encode_base64(part)
+                part.add_header("Content-Disposition",
+                                f'attachment; filename="{os.path.basename(path)}"')
+                msg.attach(part)
+            else:
+                log.warning("SMTP: attachment not found — skipping: %s", path)
 
     ctx = ssl.create_default_context()
     try:
@@ -160,16 +183,16 @@ def _send_smtp(
                 server.ehlo()
                 server.login(from_addr, password)
                 server.sendmail(from_addr, to_addr, msg.as_string())
-        print(f"  ✅  Report emailed via SMTP → {to_addr}")
+        log.info("SMTP: email delivered successfully → %s", to_addr)
         return True
     except smtplib.SMTPAuthenticationError:
-        print(
-            f"  ⚠️  SMTP auth failed. Ensure REPORT_EMAIL_PASSWORD is a Gmail App Password.\n"
-            f"      Generate one at: myaccount.google.com/apppasswords"
-        )
+        log.error(
+            "SMTP: authentication failed for %s. "
+            "Ensure REPORT_EMAIL_PASSWORD is a Gmail App Password "
+            "(myaccount.google.com/apppasswords)", from_addr)
         return False
     except Exception as exc:
-        print(f"  ⚠️  SMTP failed: {exc}")
+        log.error("SMTP: send failed: %s", exc)
         return False
 
 
@@ -184,10 +207,11 @@ def send_report(
     teaser_path: Optional[str] = None,
 ) -> bool:
     """
-    Email the full report and teaser PDF (if present) to the configured recipient.
+    Email the full report PDF to the recipient.
     Uses SendGrid if SENDGRID_API_KEY is set, otherwise falls back to Gmail SMTP.
-    Returns True on success, False on any failure.
+    Returns True on success, False on any failure. Never raises.
     """
+    # ── Resolve all config from args or env ───────────────────────
     to_addr   = (to_addr   or os.environ.get("REPORT_EMAIL_TO")
                            or os.environ.get("REPORT_RECIPIENT_EMAIL", "")).strip()
     from_addr = (from_addr
@@ -198,22 +222,46 @@ def send_report(
     smtp_host = os.environ.get("REPORT_EMAIL_SMTP", "smtp.gmail.com").strip()
     smtp_port = int(os.environ.get("REPORT_EMAIL_PORT", 587))
 
-    if not to_addr or not from_addr:
+    # ── Diagnostic env var dump ────────────────────────────────────
+    log.info("Email config: to=%r  from=%r  sg_key=%s  smtp_pw=%s",
+             to_addr, from_addr,
+             f"set ({len(sg_key)} chars)" if sg_key else "NOT SET",
+             "set" if password else "NOT SET")
+    log.info("PDF path: %s  exists=%s  size=%s",
+             report_path,
+             os.path.isfile(report_path) if report_path else False,
+             f"{os.path.getsize(report_path)} bytes"
+             if report_path and os.path.isfile(report_path) else "N/A")
+
+    # ── Guard: missing recipients / sender ────────────────────────
+    if not to_addr:
+        log.error("Email skipped — no recipient address. "
+                  "Set REPORT_EMAIL_TO env var or pass contact_email.")
+        return False
+    if not from_addr:
+        log.error("Email skipped — no sender address. "
+                  "Set SENDGRID_FROM_EMAIL (or REPORT_EMAIL_FROM) env var on Railway.")
         return False
 
+    # ── Guard: PDF missing ────────────────────────────────────────
     if report_path and not os.path.isfile(report_path):
-        print(f"  ⚠️  Email skipped — report file not found: {report_path}")
+        log.error("Email skipped — PDF not found at: %s", report_path)
         return False
 
     subject = f"C.A.S.H. Report Ready — {client_name}"
     body    = _body_text(client_name, overall_score, overall_grade)
 
+    # ── Send ──────────────────────────────────────────────────────
     if sg_key:
+        log.info("Email: using SendGrid")
         return _send_sendgrid(sg_key, from_addr, to_addr, subject, body,
                               report_path, teaser_path)
 
     if password:
+        log.info("Email: using SMTP fallback (%s:%d)", smtp_host, smtp_port)
         return _send_smtp(from_addr, password, to_addr, subject, body,
                           smtp_host, smtp_port, report_path, teaser_path)
 
+    log.error("Email skipped — no delivery method configured. "
+              "Set SENDGRID_API_KEY (recommended) or REPORT_EMAIL_PASSWORD on Railway.")
     return False
