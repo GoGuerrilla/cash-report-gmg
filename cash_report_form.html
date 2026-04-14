@@ -570,8 +570,7 @@
     const btn       = document.getElementById("submitBtn");
     const statusMsg = document.getElementById("statusMsg");
 
-    // Typeform webhook endpoint — update this URL when deployed
-    const WEBHOOK_URL = "/webhook";
+    const WEBHOOK_URL = "https://cash-report-gmg-production.up.railway.app/cash-report";
 
     function showStatus(type, msg) {
       statusMsg.className = "status " + type;
@@ -610,33 +609,24 @@
       btn.disabled = true;
       btn.textContent = "Submitting…";
 
-      // Build payload matching the webhook_server.py field refs
-      const payload = {
-        event_type: "form_response",
-        form_response: {
-          answers: [
-            { field: { ref: "business_name" },      type: "text",    text:   field("business_name") },
-            { field: { ref: "website_url" },         type: "url",     url:    field("website_url") },
-            { field: { ref: "target_market" },       type: "text",    text:   field("target_market") },
-            { field: { ref: "monthly_ad_budget" },   type: "number",  number: parseFloat(field("monthly_ad_budget")) || 0 },
-            { field: { ref: "email_list_size" },     type: "number",  number: parseFloat(field("email_list_size")) || 0 },
-            { field: { ref: "email_frequency" },     type: "text",    text:   field("email_frequency") },
-            { field: { ref: "competitor_urls" },     type: "text",    text:   field("competitor_urls") },
-            { field: { ref: "biggest_challenge" },   type: "text",    text:   field("biggest_challenge") },
-            { field: { ref: "contact_email" },       type: "email",   email:  field("contact_email") },
-            { field: { ref: "phone" },               type: "phone_number", phone_number: field("phone") },
-            { field: { ref: "marketing_consent" },   type: "boolean", boolean: document.getElementById("marketing_consent").checked },
-          ].filter(a => {
-            // Remove empty optional fields so the server doesn't misread them
-            const v = a.text || a.url || a.email || a.phone_number;
-            return a.boolean !== undefined || (a.number !== undefined && !isNaN(a.number)) || (v && v.trim() !== "");
-          })
-        }
-      };
-
       function field(id) {
         return (document.getElementById(id)?.value || "").trim();
       }
+
+      // Plain JSON payload for /cash-report endpoint
+      const payload = {
+        business_name:     field("business_name"),
+        website_url:       field("website_url"),
+        target_market:     field("target_market"),
+        ad_budget:         parseFloat(field("monthly_ad_budget")) || 0,
+        email_list_size:   parseFloat(field("email_list_size")) || 0,
+        email_frequency:   field("email_frequency"),
+        competitors:       field("competitor_urls"),
+        biggest_challenge: field("biggest_challenge"),
+        contact_email:     field("contact_email"),
+        phone:             field("phone"),
+        marketing_consent: document.getElementById("marketing_consent").checked,
+      };
 
       try {
         const res = await fetch(WEBHOOK_URL, {
