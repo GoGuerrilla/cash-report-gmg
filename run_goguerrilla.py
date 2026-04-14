@@ -548,6 +548,10 @@ def run_audit():
         print(f"\n  ICP VERDICT:\n  {verdict[:220]}...\n")
 
     # ── 11. Generate PDF report (primary) ────────────────────
+    import shutil
+    from datetime import datetime as _dt
+    import re as _re
+
     os.makedirs("reports", exist_ok=True)
     slug = config.client_name.lower().replace(" ", "_").replace("/", "_")
     pdf_path  = f"reports/{slug}_cash_report.pdf"
@@ -557,6 +561,21 @@ def run_audit():
     PDFReportGenerator(config, audit_data).generate(pdf_path)
     print(f"✅  PDF report saved: {pdf_path}")
     print(f"    Open with: open \"{pdf_path}\"\n")
+
+    # ── Archive copy to ~/Desktop/CASH GMG Audit/Client Reports/
+    try:
+        today      = _dt.now()
+        safe_name  = _re.sub(r"[^a-zA-Z0-9]+", "_", config.client_name).strip("_")
+        filename   = f"{safe_name}_CASH_Report_{today.strftime('%Y-%m-%d')}.pdf"
+        archive_dir = os.path.expanduser(
+            f"~/Desktop/CASH GMG Audit/Client Reports/{today.strftime('%Y')}/{today.strftime('%B')}"
+        )
+        os.makedirs(archive_dir, exist_ok=True)
+        dest = os.path.join(archive_dir, filename)
+        shutil.copy2(os.path.abspath(pdf_path), dest)
+        print(f"✅  Report archived → {dest}")
+    except Exception as _arc_err:
+        print(f"⚠️  Archive copy failed (non-fatal): {_arc_err}")
 
     # ── 11b. Generate Word document (backup) ──────────────────
     try:

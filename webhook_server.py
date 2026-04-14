@@ -393,6 +393,34 @@ def build_config_from_parsed(parsed: dict) -> ClientConfig:
 #  SAFE AUDITOR WRAPPER
 # ══════════════════════════════════════════════════════════════════
 
+def _archive_report(pdf_path: str, client_name: str) -> str | None:
+    """
+    Copy a generated PDF to the permanent local archive:
+      ~/Desktop/CASH GMG Audit/Client Reports/YYYY/MonthName/
+    Returns the archive path on success, None on failure.
+    """
+    import shutil
+    if not pdf_path or not os.path.isfile(pdf_path):
+        return None
+    try:
+        today      = datetime.utcnow()
+        year       = today.strftime("%Y")
+        month      = today.strftime("%B")          # e.g. "April"
+        safe_name  = re.sub(r"[^a-zA-Z0-9]+", "_", client_name).strip("_")
+        filename   = f"{safe_name}_CASH_Report_{today.strftime('%Y-%m-%d')}.pdf"
+        archive_dir = os.path.expanduser(
+            f"~/Desktop/CASH GMG Audit/Client Reports/{year}/{month}"
+        )
+        os.makedirs(archive_dir, exist_ok=True)
+        dest = os.path.join(archive_dir, filename)
+        shutil.copy2(pdf_path, dest)
+        log.info("Report archived → %s", dest)
+        return dest
+    except Exception as exc:
+        log.warning("Archive copy failed (non-fatal): %s", exc)
+        return None
+
+
 def _safe_audit(label: str, fn, default: dict) -> dict:
     """
     Run an auditor callable, returning `default` (score=50 neutral) on
@@ -656,6 +684,7 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
         PDFReportGenerator(config, audit_data).generate(pdf_path)
         if os.path.isfile(pdf_path):
             log.info("PDF saved: %s (%d bytes)", pdf_path, os.path.getsize(pdf_path))
+            _archive_report(pdf_path, name)
         else:
             log.error("PDF generation ran but file not found at: %s", pdf_path)
     except Exception as pdf_err:
