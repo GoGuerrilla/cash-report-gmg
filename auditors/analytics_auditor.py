@@ -116,14 +116,9 @@ class AnalyticsAuditor:
     # ── Client construction ────────────────────────────────────
 
     def _build_client(self):
-        """Return an authenticated BetaAnalyticsDataClient."""
+        """Return an authenticated BetaAnalyticsDataClient via service account."""
         from google.analytics.data_v1beta import BetaAnalyticsDataClient
-
-        if self.sa_json_path and os.path.isfile(self.sa_json_path):
-            return BetaAnalyticsDataClient.from_service_account_file(self.sa_json_path)
-
-        # Fall back to Application Default Credentials (gcloud auth)
-        return BetaAnalyticsDataClient()
+        return BetaAnalyticsDataClient.from_service_account_file(self.sa_json_path)
 
     # ── Fetch all metrics ──────────────────────────────────────
 

@@ -96,6 +96,32 @@ class GEOAuditor:
     # ═══════════════════════════════════════════════════════════
 
     def run(self) -> Dict[str, Any]:
+        try:
+            return self._run_inner()
+        except Exception as exc:
+            import traceback as _tb
+            import logging as _log
+            _log.getLogger("webhook").warning(
+                "GEO auditor failed — returning score=50 neutral. Error: %s\n%s",
+                exc, _tb.format_exc())
+            return {
+                "score": 50, "grade": "C",
+                "note": f"GEO audit unavailable: {exc}",
+                "components": {}, "component_detail": {},
+                "issues": [], "strengths": [], "recommendations": [],
+                "platform_notes": [], "serp_keywords": [],
+                "serp_summary": {
+                    "total_clicks": None, "total_impressions": None,
+                    "avg_position": None, "top_3_count": 0, "top_10_count": 0,
+                    "branded_keywords": 0, "non_branded_keywords": 0,
+                },
+                "onpage_detail": {
+                    "title": "", "meta_description": "", "h1s": [], "h2s": [],
+                    "has_faq_schema": False, "schema_types": [], "word_count": 0,
+                },
+            }
+
+    def _run_inner(self) -> Dict[str, Any]:
         # One scrape shared by on-page and schema checks
         self._onpage = self._scrape_homepage()
 

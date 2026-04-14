@@ -434,7 +434,11 @@ def run_audit():
     print(f"  SEO score: {seo_score}/100  (method: {seo_method})")
 
     print("→ Auditing GEO (AI visibility)...")
-    audit_data["geo"] = GEOAuditor(config, audit_data["seo"]).run()
+    try:
+        audit_data["geo"] = GEOAuditor(config, audit_data["seo"]).run()
+    except Exception as _geo_err:
+        print(f"  ⚠️  GEO auditor failed ({_geo_err}) — scored at 50 neutral")
+        audit_data["geo"] = {"score": 50, "grade": "C", "issues": [], "strengths": []}
 
     print("→ Auditing Google Business Profile...")
     places_key = os.environ.get("GOOGLE_PLACES_API_KEY", os.environ.get("PAGESPEED_API_KEY", ""))

@@ -390,6 +390,25 @@ def build_config_from_parsed(parsed: dict) -> ClientConfig:
 
 
 # ══════════════════════════════════════════════════════════════════
+#  SAFE AUDITOR WRAPPER
+# ══════════════════════════════════════════════════════════════════
+
+def _safe_audit(label: str, fn, default: dict) -> dict:
+    """
+    Run an auditor callable, returning `default` (score=50 neutral) on
+    any exception so a single auditor failure never kills the audit thread.
+    """
+    try:
+        return fn()
+    except Exception as exc:
+        log.warning("Auditor [%s] failed — using neutral default. Error: %s", label, exc)
+        return default
+
+
+_NEUTRAL = {"score": 50, "grade": "C", "issues": [], "strengths": []}
+
+
+# ══════════════════════════════════════════════════════════════════
 #  CORE AUDIT RUNNER  (generalized — works for any client)
 # ══════════════════════════════════════════════════════════════════
 
@@ -529,25 +548,26 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
 
     if target_url:
         log.info("Auditing website: %s", target_url)
-        website_auditor = WebsiteAuditor(target_url, max_pages=5)
-        audit_data["website"] = website_auditor.run()
+        audit_data["website"] = _safe_audit(
+            "website", lambda: WebsiteAuditor(target_url, max_pages=5).run(), _NEUTRAL)
         _merge_website_data(channel_data, audit_data["website"])
 
         log.info("Auditing SEO...")
         pagespeed_key = os.environ.get("PAGESPEED_API_KEY", "")
-        audit_data["seo"] = SEOAuditor(target_url, api_key=pagespeed_key).run()
+        audit_data["seo"] = _safe_audit(
+            "seo", lambda: SEOAuditor(target_url, api_key=pagespeed_key).run(), _NEUTRAL)
 
-        log.info("Auditing GEO...")
-        audit_data["geo"] = GEOAuditor(config, audit_data.get("seo", {})).run()
+        log.info("Auditing GEO / Search Console...")
+        audit_data["geo"] = _safe_audit(
+            "geo", lambda: GEOAuditor(config, audit_data.get("seo", {})).run(), _NEUTRAL)
 
         log.info("Auditing GBP...")
         places_key = os.environ.get("GOOGLE_PLACES_API_KEY",
                                      os.environ.get("PAGESPEED_API_KEY", ""))
-        audit_data["gbp"] = GBPAuditor(
-            business_name=name,
-            website_url=target_url,
-            api_key=places_key,
-        ).run()
+        audit_data["gbp"] = _safe_audit(
+            "gbp", lambda: GBPAuditor(
+                business_name=name, website_url=target_url, api_key=places_key).run(),
+            _NEUTRAL)
 
         log.info("Fetching Analytics...")
         ga_prop = os.environ.get("GOOGLE_ANALYTICS_PROPERTY_ID", "")
@@ -555,51 +575,56 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
         if ga_sa and not os.path.isfile(ga_sa):
             log.warning("GA service account file not found at %r — skipping GA (score=50)", ga_sa)
             ga_sa = ""
-        try:
-            audit_data["analytics"] = AnalyticsAuditor(
-                property_id=ga_prop, service_account_json_path=ga_sa
-            ).run()
-        except Exception as ga_err:
-            log.warning("GA auditor failed (%s) — continuing with score=50", ga_err)
-            audit_data["analytics"] = {
-                "score": 50, "grade": "C",
-                "data_source": "not_available",
-                "note": "Google Analytics unavailable on this server — score set to neutral.",
-                "monthly_visitors": None, "traffic_trend_pct": None,
-                "traffic_trend_label": "—", "bounce_rate_pct": None,
-                "avg_session_duration": "—", "top_traffic_sources": [],
-                "top_landing_pages": [], "issues": [], "strengths": [],
-            }
+        _ga_neutral = {
+            "score": 50, "grade": "C", "data_source": "not_available",
+            "note": "Google Analytics unavailable — score set to neutral.",
+            "monthly_visitors": None, "traffic_trend_pct": None,
+            "traffic_trend_label": "—", "bounce_rate_pct": None,
+            "avg_session_duration": "—", "top_traffic_sources": [],
+            "top_landing_pages": [], "issues": [], "strengths": [],
+        }
+        audit_data["analytics"] = _safe_audit(
+            "analytics",
+            lambda: AnalyticsAuditor(
+                property_id=ga_prop, service_account_json_path=ga_sa).run(),
+            _ga_neutral)
     else:
-        log.warning("No website URL — skipping website/SEO/GEO/GBP auditors")
+        log.warning("No website URL — skipping website/SEO/GEO/GBP/analytics auditors")
         for key in ("website", "seo", "geo", "gbp", "analytics"):
             audit_data[key] = {"note": "No website URL provided", "score": 50}
 
     # ── 3–10. All remaining auditors ─────────────────────────────
     log.info("Auditing social channels...")
-    audit_data["social"]    = SocialMediaAuditor(config).run()
+    audit_data["social"] = _safe_audit(
+        "social", lambda: SocialMediaAuditor(config).run(), _NEUTRAL)
 
     log.info("Auditing content efficiency...")
-    audit_data["content"]   = ContentAuditor(config, audit_data).run()
+    audit_data["content"] = _safe_audit(
+        "content", lambda: ContentAuditor(config, audit_data).run(), _NEUTRAL)
 
     log.info("Auditing brand consistency...")
-    audit_data["brand"]     = BrandAuditor(config, linktree_data).run()
+    audit_data["brand"] = _safe_audit(
+        "brand", lambda: BrandAuditor(config, linktree_data).run(), _NEUTRAL)
 
     log.info("Auditing lead funnel...")
-    audit_data["funnel"]    = FunnelAuditor(config, linktree_data).run()
+    audit_data["funnel"] = _safe_audit(
+        "funnel", lambda: FunnelAuditor(config, linktree_data).run(), _NEUTRAL)
 
     log.info("Auditing ICP alignment...")
-    audit_data["icp"]       = ICPAuditor(config, linktree_data).run()
+    audit_data["icp"] = _safe_audit(
+        "icp", lambda: ICPAuditor(config, linktree_data).run(), _NEUTRAL)
 
     log.info("Auditing content freshness...")
-    audit_data["freshness"] = FreshnessAuditor(config, linktree_data).run()
+    audit_data["freshness"] = _safe_audit(
+        "freshness", lambda: FreshnessAuditor(config, linktree_data).run(), _NEUTRAL)
 
     if config.competitor_urls:
         log.info("Auditing competitors: %s", config.competitor_urls)
         pagespeed_key = os.environ.get("PAGESPEED_API_KEY", "")
-        audit_data["competitor"] = CompetitorAuditor(
-            config, audit_data, pagespeed_api_key=pagespeed_key
-        ).run()
+        audit_data["competitor"] = _safe_audit(
+            "competitor", lambda: CompetitorAuditor(
+                config, audit_data, pagespeed_api_key=pagespeed_key).run(),
+            {"skipped": True, "note": "Competitor audit failed.", "competitors": [], "comparison": {}})
     else:
         audit_data["competitor"] = {
             "skipped": True, "note": "No competitor URLs provided.",
