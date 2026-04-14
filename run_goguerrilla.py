@@ -454,7 +454,21 @@ def run_audit():
     print("→ Fetching Google Analytics traffic data...")
     ga_prop = os.environ.get("GOOGLE_ANALYTICS_PROPERTY_ID", "")
     ga_sa   = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON_PATH", "")
-    ga_result = AnalyticsAuditor(property_id=ga_prop, service_account_json_path=ga_sa).run()
+    if ga_sa and not os.path.isfile(ga_sa):
+        print(f"  ⚠️  GA service account file not found at {ga_sa!r} — skipping GA (score=50)")
+        ga_sa = ""
+    try:
+        ga_result = AnalyticsAuditor(property_id=ga_prop, service_account_json_path=ga_sa).run()
+    except Exception as _ga_err:
+        print(f"  ⚠️  GA auditor failed ({_ga_err}) — scored at 50 neutral")
+        ga_result = {
+            "score": 50, "grade": "C", "data_source": "not_available",
+            "note": "Google Analytics unavailable — score set to neutral.",
+            "monthly_visitors": None, "traffic_trend_pct": None,
+            "traffic_trend_label": "—", "bounce_rate_pct": None,
+            "avg_session_duration": "—", "top_traffic_sources": [],
+            "top_landing_pages": [], "issues": [], "strengths": [],
+        }
     audit_data["analytics"] = ga_result
     if ga_result.get("data_source") == "google_analytics_data_api_v4":
         visitors = ga_result.get("monthly_visitors", 0)

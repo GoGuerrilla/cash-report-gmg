@@ -552,9 +552,24 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
         log.info("Fetching Analytics...")
         ga_prop = os.environ.get("GOOGLE_ANALYTICS_PROPERTY_ID", "")
         ga_sa   = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON_PATH", "")
-        audit_data["analytics"] = AnalyticsAuditor(
-            property_id=ga_prop, service_account_json_path=ga_sa
-        ).run()
+        if ga_sa and not os.path.isfile(ga_sa):
+            log.warning("GA service account file not found at %r — skipping GA (score=50)", ga_sa)
+            ga_sa = ""
+        try:
+            audit_data["analytics"] = AnalyticsAuditor(
+                property_id=ga_prop, service_account_json_path=ga_sa
+            ).run()
+        except Exception as ga_err:
+            log.warning("GA auditor failed (%s) — continuing with score=50", ga_err)
+            audit_data["analytics"] = {
+                "score": 50, "grade": "C",
+                "data_source": "not_available",
+                "note": "Google Analytics unavailable on this server — score set to neutral.",
+                "monthly_visitors": None, "traffic_trend_pct": None,
+                "traffic_trend_label": "—", "bounce_rate_pct": None,
+                "avg_session_duration": "—", "top_traffic_sources": [],
+                "top_landing_pages": [], "issues": [], "strengths": [],
+            }
     else:
         log.warning("No website URL — skipping website/SEO/GEO/GBP auditors")
         for key in ("website", "seo", "geo", "gbp", "analytics"):
