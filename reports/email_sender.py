@@ -248,7 +248,7 @@ def send_report(
         log.error("Email skipped — PDF not found at: %s", report_path)
         return False
 
-    subject = f"C.A.S.H. Report Ready — {client_name}"
+    subject = f"Your C.A.S.H. Report for {client_name} is Ready"
     body    = _body_text(client_name, overall_score, overall_grade)
 
     # ── Send ──────────────────────────────────────────────────────
