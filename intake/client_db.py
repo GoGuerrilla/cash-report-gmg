@@ -1,6 +1,7 @@
 """
 C.A.S.H. Report by GMG — Client Database
-Saves audit results to a local SQLite database (cash_clients.db).
+Saves audit results to a local SQLite database (cash_clients.db) or a
+Railway-hosted Postgres database when DATABASE_URL is set in the environment.
 
 Schema
 ------
@@ -25,13 +26,41 @@ clients
   seo_score          INTEGER
   geo_score          INTEGER
   created_at         TEXT        -- ISO-8601 datetime
+
+Environment variables
+---------------------
+  DATABASE_URL   — Postgres DSN (e.g. postgresql://user:pass@host/db).
+                   When set, all operations target Postgres (Railway).
+                   When absent, falls back to local SQLite (cash_clients.db).
 """
 import sqlite3
 import os
 from datetime import datetime, date
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cash_clients.db")
+
+_DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+
+
+# ── Connection helpers (SQLite or Postgres) ───────────────────────
+
+def _use_postgres() -> bool:
+    return bool(_DATABASE_URL)
+
+
+def _connect_pg():
+    """Return a psycopg2 connection to the Railway Postgres database."""
+    try:
+        import psycopg2
+        import psycopg2.extras
+    except ImportError as exc:
+        raise RuntimeError(
+            "psycopg2 is required for Postgres support. "
+            "Install it with: pip install psycopg2-binary"
+        ) from exc
+    conn = psycopg2.connect(_DATABASE_URL)
+    return conn
 
 
 def _connect() -> sqlite3.Connection:
@@ -199,3 +228,45 @@ def get_client_by_id(row_id: int) -> Optional[dict]:
             "SELECT * FROM clients WHERE id = ?", (row_id,)
         ).fetchone()
     return dict(row) if row else None
+
+
+def get_opted_in_emails() -> List[dict]:
+    """
+    Return all client records where marketing_consent = 1 (opted in).
+
+    Each record is a dict with keys:
+      email, client_name, business_type, website, audit_score, audit_date, created_at
+
+    Works with both SQLite (local) and Postgres (Railway via DATABASE_URL).
+    """
+    if _use_postgres():
+        conn = _connect_pg()
+        try:
+            import psycopg2.extras
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT email, client_name, business_type, website,
+                           audit_score, audit_date, created_at
+                    FROM clients
+                    WHERE marketing_consent = 1
+                      AND email IS NOT NULL
+                      AND email <> ''
+                    ORDER BY created_at DESC
+                """)
+                rows = [dict(r) for r in cur.fetchall()]
+        finally:
+            conn.close()
+        return rows
+    else:
+        ensure_schema()
+        with _connect() as conn:
+            rows = conn.execute("""
+                SELECT email, client_name, business_type, website,
+                       audit_score, audit_date, created_at
+                FROM clients
+                WHERE marketing_consent = 1
+                  AND email IS NOT NULL
+                  AND email <> ''
+                ORDER BY created_at DESC
+            """).fetchall()
+        return [dict(r) for r in rows]

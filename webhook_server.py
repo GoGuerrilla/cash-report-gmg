@@ -13,8 +13,9 @@ Usage
 
 Endpoints
 ---------
-  POST /webhook    — Typeform webhook target
-  GET  /health     — health / status check
+  POST /webhook        — Typeform webhook target
+  GET  /health         — health / status check
+  GET  /export-emails  — CSV export of opted-in emails (key-protected)
 
 Typeform Setup
 --------------
@@ -42,6 +43,8 @@ Typeform Setup
 3. Add to .env:
      TYPEFORM_WEBHOOK_SECRET=<your typeform webhook secret>
      WEBHOOK_LOG_FILE=webhook_audit.log   (optional — default: stdout only)
+     EXPORT_SECRET_KEY=<random secret>    (protects GET /export-emails)
+     DATABASE_URL=<postgres dsn>          (Railway Postgres — omit for local SQLite)
 
 Security
 --------
@@ -114,7 +117,7 @@ from analyzers.ai_analyzer import AIAnalyzer
 from reports.pdf_generator import PDFReportGenerator
 from reports.docx_generator import DocxReportGenerator
 from reports.email_sender import send_report
-from intake.client_db import save_audit_result
+from intake.client_db import save_audit_result, get_opted_in_emails
 from intake.rate_limiter import RateLimiter, get_public_ip
 from run_goguerrilla import _build_base_channel_data, _merge_website_data
 
@@ -1010,6 +1013,84 @@ def cash_report():
 
 
 # ══════════════════════════════════════════════════════════════════
+#  EMAIL EXPORT ENDPOINT
+# ══════════════════════════════════════════════════════════════════
+
+@app.route("/export-emails", methods=["GET"])
+def export_emails():
+    """
+    Export all opted-in client emails as a CSV download.
+
+    Authentication
+    --------------
+    Requires the secret key to be passed via either:
+      • Query param : GET /export-emails?key=<EXPORT_SECRET_KEY>
+      • Header      : X-Export-Key: <EXPORT_SECRET_KEY>
+
+    Set EXPORT_SECRET_KEY in .env (Railway → Variables) to enable this endpoint.
+    If the env var is not set the endpoint returns 503 (misconfigured).
+
+    CSV columns
+    -----------
+    email, client_name, business_type, website, audit_score, audit_date, created_at
+
+    Example
+    -------
+      curl "https://your-app.railway.app/export-emails?key=mysecret" -o emails.csv
+    """
+    import csv
+    import io
+
+    secret = os.environ.get("EXPORT_SECRET_KEY", "").strip()
+    if not secret:
+        log.warning("/export-emails called but EXPORT_SECRET_KEY is not set")
+        return jsonify({"error": "Export endpoint is not configured on this server"}), 503
+
+    # Accept key from query param or header (constant-time compare)
+    provided = (
+        request.args.get("key", "")
+        or request.headers.get("X-Export-Key", "")
+    ).strip()
+
+    if not hmac.compare_digest(provided.encode(), secret.encode()):
+        log.warning("/export-emails rejected — invalid key from %s", request.remote_addr)
+        return jsonify({"error": "Unauthorized"}), 401
+
+    try:
+        rows = get_opted_in_emails()
+    except Exception as exc:
+        log.error("/export-emails DB error: %s", exc)
+        return jsonify({"error": "Database error", "detail": str(exc)}), 500
+
+    # Build CSV in memory
+    output = io.StringIO()
+    fieldnames = ["email", "client_name", "business_type", "website",
+                  "audit_score", "audit_date", "created_at"]
+    writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore",
+                            lineterminator="\r\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    csv_bytes = output.getvalue().encode("utf-8")
+
+    log.info("/export-emails served %d opted-in records to %s",
+             len(rows), request.remote_addr)
+
+    from flask import Response
+    return Response(
+        csv_bytes,
+        status=200,
+        mimetype="text/csv",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="cash_opted_in_emails_'
+                f'{datetime.utcnow().strftime("%Y%m%d")}.csv"'
+            ),
+            "Content-Length": str(len(csv_bytes)),
+        },
+    )
+
+
+# ══════════════════════════════════════════════════════════════════
 #  REJECTION EMAIL HELPER
 # ══════════════════════════════════════════════════════════════════
 
@@ -1056,8 +1137,13 @@ def _send_rejection_email(to_addr: str, client_name: str, reason: str):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     log.info("Starting C.A.S.H. Webhook Listener on http://0.0.0.0:%d", port)
-    log.info("  POST /webhook  — Typeform webhook target")
-    log.info("  GET  /health   — health check")
-    wh_secret = os.environ.get("TYPEFORM_WEBHOOK_SECRET", "")
-    log.info("  Signature verification: %s", "ON" if wh_secret else "OFF (set TYPEFORM_WEBHOOK_SECRET)")
+    log.info("  POST /webhook       — Typeform webhook target")
+    log.info("  GET  /health        — health check")
+    log.info("  GET  /export-emails — opted-in email CSV (key-protected)")
+    wh_secret  = os.environ.get("TYPEFORM_WEBHOOK_SECRET", "")
+    exp_secret = os.environ.get("EXPORT_SECRET_KEY", "")
+    db_url     = os.environ.get("DATABASE_URL", "")
+    log.info("  Signature verification : %s", "ON" if wh_secret else "OFF (set TYPEFORM_WEBHOOK_SECRET)")
+    log.info("  Email export key       : %s", "SET" if exp_secret else "NOT SET — /export-emails will return 503")
+    log.info("  Database backend       : %s", f"Postgres ({db_url[:30]}...)" if db_url else "SQLite (cash_clients.db)")
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
