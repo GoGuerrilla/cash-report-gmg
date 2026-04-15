@@ -81,6 +81,100 @@ _HEADERS_GOOGLEBOT: Dict[str, str] = {
 
 _FETCH_TIMEOUT = 15  # seconds
 
+# ── Tracking / noise query parameters to strip before auditing ────────────────
+_TRACKING_PARAMS: frozenset = frozenset({
+    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+    "utm_id", "utm_source_platform", "fbclid", "gclid", "dclid", "gbraid",
+    "wbraid", "msclkid", "twclid", "li_fat_id", "mc_eid", "mc_cid",
+    "yclid", "_ga", "_gl", "igshid", "s_cid", "ref", "source",
+})
+
+
+def _strip_tracking_params(url: str) -> str:
+    """Strip known tracking query parameters and fragments from a URL."""
+    try:
+        from urllib.parse import urlparse, urlencode, urlunparse, parse_qsl
+        p = urlparse(url)
+        qs = urlencode(
+            [(k, v) for k, v in parse_qsl(p.query)
+             if k.lower() not in _TRACKING_PARAMS]
+        )
+        return urlunparse(p._replace(query=qs, fragment=""))
+    except Exception:
+        return url
+
+
+def normalize_url(url: str, timeout: int = 10) -> str:
+    """
+    Normalize a URL before auditing:
+      1. Strip tracking query parameters (utm_*, fbclid, gclid, etc.)
+      2. Remove URL fragments (#...)
+      3. Follow HTTP redirects via a HEAD request (falls back to GET if the
+         server rejects HEAD) to resolve www vs non-www, http vs https, and
+         301/302 canonical targets.
+
+    Returns the cleaned, redirected URL. Never raises.
+    """
+    url = _strip_tracking_params(url)
+    if not REQUESTS_OK or not url:
+        return url.rstrip("/")
+
+    for headers in (_HEADERS_CHROME, _HEADERS_GOOGLEBOT):
+        try:
+            r = requests.head(
+                url, headers=headers, timeout=timeout, allow_redirects=True
+            )
+            if r.status_code in (403, 429, 503) and headers is _HEADERS_CHROME:
+                continue
+            if r.status_code == 405:
+                # Server rejects HEAD — stream GET to get final URL cheaply
+                rg = requests.get(
+                    url, headers=headers, timeout=timeout,
+                    allow_redirects=True, stream=True,
+                )
+                rg.close()
+                return _strip_tracking_params(rg.url).rstrip("/")
+            return _strip_tracking_params(r.url).rstrip("/")
+        except Exception:
+            break
+
+    return url.rstrip("/")
+
+
+def fetch_url_ex(
+    url: str, timeout: int = _FETCH_TIMEOUT
+) -> Tuple[Optional[str], int, str]:
+    """
+    Like fetch_url() but also returns the final URL after following redirects.
+    Tracking parameters are stripped from the final URL.
+
+    Attempt order:
+      1. Chrome UA  → if 403/429/503: retry with Googlebot UA
+      2. Googlebot UA
+
+    Returns (html_text, status_code, final_url).
+    Returns (None, 0, original_url) on network error or both attempts failing.
+    Never raises.
+    """
+    if not REQUESTS_OK or not url:
+        return None, 0, url
+
+    for headers in (_HEADERS_CHROME, _HEADERS_GOOGLEBOT):
+        try:
+            r = requests.get(
+                url, headers=headers, timeout=timeout, allow_redirects=True
+            )
+            if r.status_code in (403, 429, 503) and headers is _HEADERS_CHROME:
+                continue
+            final = _strip_tracking_params(r.url)
+            return r.text, r.status_code, final
+        except requests.exceptions.Timeout:
+            return None, 0, url
+        except Exception:
+            return None, 0, url
+
+    return None, 0, url
+
 
 def fetch_url(url: str, timeout: int = _FETCH_TIMEOUT) -> Tuple[Optional[str], int]:
     """
@@ -137,11 +231,22 @@ def parse_html(html: str) -> Optional[Any]:
 def detect_platform(soup: Optional[Any], html: str = "") -> str:
     """
     Detect the CMS / website platform from HTML fingerprints.
-    Returns one of: 'wix' | 'squarespace' | 'shopify' | 'wordpress'
-                    | 'webflow' | 'unknown'
 
-    Used to adjust scraping expectations (e.g., Wix embeds H1 in static HTML
-    despite being a visual page builder).
+    Returns one of:
+      'wix' | 'squarespace' | 'shopify' | 'wordpress' | 'webflow'
+      'nextjs'  — Next.js (SSR/ISR — content is in HTML, scraping works)
+      'react'   — Create-React-App or other client-side-only React SPA
+                  (content is JS-rendered; technical signals may be absent
+                  from raw HTML and should be treated as Unable-to-validate)
+      'vue'     — Vue SPA (same caveat as 'react')
+      'unknown'
+
+    Scraping behaviour notes:
+      Wix / Squarespace / Shopify / WordPress / Webflow / Next.js — all use
+      server-side rendering; H1, meta tags, and schema appear in raw HTML.
+      react / vue — pure client-side SPAs; raw HTML typically contains only
+      a shell div; missing technical signals should be Unable-to-validate,
+      not scored as failures.
     """
     html_l = html.lower() if html else ""
 
@@ -181,6 +286,28 @@ def detect_platform(soup: Optional[Any], html: str = "") -> str:
             return "wordpress"
     if "wp-content" in html_l or "wp-includes" in html_l or "wp-json" in html_l:
         return "wordpress"
+
+    # Next.js — SSR/ISR; content is present in HTML, scraping works normally
+    if "__next_data__" in html_l or '"next"' in html_l or "/_next/static" in html_l:
+        return "nextjs"
+
+    # Pure React SPA — content rendered client-side; missing tags = unable-to-validate
+    # Key signal: root div with no meaningful child content
+    if soup:
+        root = soup.find(id="root") or soup.find(attrs={"data-reactroot": True})
+        if root is not None and len(root.get_text(strip=True)) < 50:
+            return "react"
+    if "data-reactroot" in html_l:
+        return "react"
+
+    # Vue SPA — same client-side caveat as React
+    if soup:
+        app_div = soup.find(id="app")
+        if app_div is not None and len(app_div.get_text(strip=True)) < 50:
+            if "vue" in html_l or "vuejs" in html_l:
+                return "vue"
+    if "__vue_app__" in html_l or "vue.runtime" in html_l:
+        return "vue"
 
     return "unknown"
 
