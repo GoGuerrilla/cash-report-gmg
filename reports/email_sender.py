@@ -40,30 +40,22 @@ log = logging.getLogger("webhook")
 
 
 def _body_text(client_name: str, overall_score, overall_grade) -> str:
-    score_line = ""
-    if overall_score is not None and overall_grade:
-        score_line = f"Overall C.A.S.H. Score: {overall_score}/100 ({overall_grade})\n\n"
     return (
         f"Hi,\n\n"
         f"Your C.A.S.H. Report for {client_name} is ready.\n\n"
-        f"{score_line}"
+        f"Overall C.A.S.H. Score: {overall_score}/100 ({overall_grade})\n\n"
         f"The full report is attached as a PDF.\n\n"
         f"C.A.S.H. stands for:\n"
-        f"  C — Content\n"
-        f"  A — Audience\n"
-        f"  S — Sales\n"
-        f"  H — Hold (Retention)\n\n"
-        f"────────────────────────────────────────\n\n"
+        f"C — Content\n"
+        f"A — Audience\n"
+        f"S — Sales\n"
+        f"H — Hold (Retention)\n\n"
         f"Your report is just the starting point. Optimization begins now.\n\n"
         f"A GMG strategist is already reviewing your results and will be reaching out "
         f"with key insights and opportunities tailored to your business.\n\n"
         f"If you'd prefer to get ahead and start the conversation sooner, you can "
         f"schedule your strategy session here:\n\n"
-        f"www.gogmg.net/meeting\n\n"
-        f"────────────────────────────────────────\n\n"
-        f"Report generated: {date.today().strftime('%B %d, %Y')}\n\n"
-        f"—\n"
-        f"C.A.S.H. Report by GMG · goguerrilla.xyz"
+        f"www.gogmg.net/meeting"
     )
 
 
