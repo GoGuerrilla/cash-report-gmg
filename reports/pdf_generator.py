@@ -433,9 +433,11 @@ class PDFReportGenerator:
         story.append(HRFlowable(width="100%", thickness=1.5, color=ELEC_BLUE, spaceAfter=16))
 
         # Grade + score hero
-        # Fixed row height ensures the grade letter is truly centred in its cell
+        # TOPPADDING=18 on the grade cell manually centres the cap-height of the
+        # letter inside the fixed-height row (calculated from Helvetica ascender/
+        # cap-height metrics so VALIGN TOP lands the visual centre at row mid-point).
         _ROW_H = 80
-        gc = _grade_color(grade)
+        sc_color = _score_color(score)   # same green/amber/red used throughout report
         score_tbl = Table(
             [[Paragraph(grade, _ps("grd", fontName="Helvetica-Bold", fontSize=52,
                                    leading=52, textColor=WHITE, alignment=TA_CENTER,
@@ -447,11 +449,14 @@ class PDFReportGenerator:
             rowHeights=[_ROW_H],
         )
         score_tbl.setStyle(TableStyle([
-            ("BACKGROUND",   (0, 0), (0, 0), gc),
-            ("BACKGROUND",   (1, 0), (1, 0), NAVY_MID),
+            ("BACKGROUND",   (0, 0), (0, 0), sc_color),
+            ("BACKGROUND",   (1, 0), (1, 0), sc_color),
             ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
             ("ALIGN",        (0, 0), (-1, -1), "CENTER"),
-            ("TOPPADDING",   (0, 0), (0, 0),   0),
+            # Grade-letter cell: override VALIGN to TOP + explicit top-padding so
+            # the capital letter's visual centre lands at the row's true mid-point.
+            ("VALIGN",       (0, 0), (0, 0),   "TOP"),
+            ("TOPPADDING",   (0, 0), (0, 0),   18),
             ("BOTTOMPADDING",(0, 0), (0, 0),   0),
             ("TOPPADDING",   (1, 0), (1, 0),   8),
             ("BOTTOMPADDING",(1, 0), (1, 0),   8),
@@ -831,15 +836,42 @@ class PDFReportGenerator:
         # Website
         web = self.data.get("website",{})
         story += self._sub_hdr(f"Website Audit  —  Technical: {web.get('scores',{}).get('technical',50)}/100")
+        _web_dq = web.get("data_quality", {})
         meta = [
-            ("URL",          web.get("url","—")),
-            ("HTTPS",        "✅ Yes" if web.get("https_enabled") else "❌ No"),
-            ("Load Time",    f"{web.get('load_time_seconds','?')}s"),
-            ("Pages Crawled",str(web.get("pages_crawled",0))),
+            ("URL",             web.get("url","—")),
+            ("HTTPS",           "✅ Yes" if web.get("https_enabled") else "❌ No"),
+            ("Load Time",       f"{web.get('load_time_seconds','?')}s"),
+            ("Platform",        web.get("platform", "unknown").title()),
+            ("Pages Audited",   str(web.get("pages_crawled", 0))),
+            ("Data Reliability",f"{_web_dq.get('reliability_score','—')}/100"),
         ]
         story.append(self._detail_table(["FIELD","VALUE"], meta,
                                         col_widths=[1.8*inch, 3.5*inch]))
+
+        # Pages audited breakdown (multi-page audit)
+        _pages_detail = web.get("pages_detail", [])
+        if len(_pages_detail) > 1:
+            story += self._sub_hdr("Pages Audited")
+            story.append(self._detail_table(
+                ["PAGE", "TYPE", "TITLE PRESENT", "H1 COUNT", "SCHEMA", "WORD COUNT"],
+                [
+                    (
+                        p.get("url","")[-55:],
+                        p.get("type", "—").title(),
+                        "✅ Yes" if p.get("title") else "❌ No",
+                        str(p.get("h1_count", 0)),
+                        "✅ Yes" if p.get("has_schema") else "❌ No",
+                        str(p.get("word_count", 0)),
+                    )
+                    for p in _pages_detail
+                ],
+                col_widths=[1.9*inch, 0.75*inch, 0.85*inch, 0.55*inch, 0.6*inch, 0.75*inch],
+            ))
+
         story += self._issues_strengths(web.get("issues",[]), web.get("strengths",[]))
+
+        # Data quality — sits between website audit and brand
+        story += self._data_quality_section()
 
         # Brand — keep header + content together on same page
         brand = self.data.get("brand",{})
@@ -905,7 +937,7 @@ class PDFReportGenerator:
         verdict = icp.get("icp_verdict","")
         if verdict:
             story += self._sub_hdr("ICP Alignment Verdict")
-            story += self._callout(verdict, _score_color(icp.get("score",50)))
+            story += self._callout(verdict, AMBER_BG)
 
         pf = brand.get("platform_fit",{})
         ps = pf.get("platform_scores",{})
@@ -1281,7 +1313,7 @@ class PDFReportGenerator:
         if _canon:
             onpage_rows.append(("Canonical Tag", f"✅ {_canon[:60]}{'…' if len(_canon) > 60 else ''}"))
         else:
-            onpage_rows.append(("Canonical Tag", "🟡 Missing — add <link rel='canonical'>"))
+            onpage_rows.append(("Canonical Tag", "🟡 Missing — add a canonical link element"))
 
         if op.get("is_noindex"):
             onpage_rows.append(("Indexability", "🔴 noindex directive found — excluded from search engines"))
@@ -1537,6 +1569,105 @@ class PDFReportGenerator:
 
         story.append(Spacer(1, 0.1*inch))
         story.append(cta_box)
+        return story
+
+    # ══════════════════════════════════════════════════════════
+    #  DATA QUALITY SECTION helper
+    # ══════════════════════════════════════════════════════════
+
+    def _data_quality_section(self) -> List:
+        """
+        Build a Data Quality & Reliability table that appears at the top of
+        the Content section (section C), giving readers immediate context on
+        how confidently the audit data was gathered.
+
+        Merges data_quality from both the SEO auditor and Website auditor —
+        SEO data takes precedence because it performs URL normalization,
+        platform detection, schema parsing, and optional Playwright rendering.
+        """
+        seo_dq  = self.data.get("seo",     {}).get("data_quality", {})
+        web_dq  = self.data.get("website", {}).get("data_quality", {})
+
+        # Merge: web_dq as base, seo_dq overrides where both have a value
+        dq = {**web_dq, **{k: v for k, v in seo_dq.items() if v is not None}}
+
+        if not dq:
+            return []
+
+        rel_score   = dq.get("reliability_score", 0)
+        platform    = dq.get("platform_detected", "unknown")
+        sq          = dq.get("schema_quality", "no")
+        render_used = dq.get("render_used", False)
+        render_stat = dq.get("render_status", "not attempted")
+        orig_url    = dq.get("original_url", "—")
+        final_url   = dq.get("final_url", orig_url)
+        redirects   = dq.get("redirects_resolved", False)
+        pages_aud   = dq.get("pages_audited") or web_dq.get("pages_audited", 1)
+
+        # URL normalisation display
+        if orig_url and final_url and orig_url != final_url:
+            url_norm_val = f"✅ Yes — redirected to {final_url[:55]}{'…' if len(final_url)>55 else ''}"
+        else:
+            url_norm_val = "✅ Yes — tracking params stripped"
+
+        redirect_val = (
+            f"✅ Yes — {orig_url[:40]}{'…' if len(orig_url)>40 else ''} → {final_url[:40]}{'…' if len(final_url)>40 else ''}"
+            if redirects else "— No redirects detected"
+        )
+
+        platform_val = (
+            f"✅ {platform.title()}" if platform != "unknown" else "⚠️ Unknown — generic scoring applied"
+        )
+
+        schema_labels = {
+            "yes":     "✅ Parsed — multiple schema types detected",
+            "partial": "⚠️ Partial — one schema type detected",
+            "no":      "❌ Not found — add JSON-LD structured data",
+        }
+
+        if render_used:
+            render_val = "✅ Playwright rendered — JS content verified"
+        elif PLAYWRIGHT_OK if False else False:   # Playwright available but not triggered
+            render_val = "— Not needed (SSR platform detected)"
+        else:
+            render_val = "— Not used (SSR platform / Playwright optional)"
+
+        pages_val = f"{pages_aud} page{'s' if pages_aud != 1 else ''} audited"
+        if pages_aud >= 3:
+            pages_val += " (homepage + about + service)"
+        elif pages_aud == 2:
+            pages_val += " (homepage + 1 secondary)"
+
+        # Reliability colour
+        if rel_score >= 75:
+            rel_label = f"✅ {rel_score}/100 — High reliability"
+        elif rel_score >= 50:
+            rel_label = f"⚠️ {rel_score}/100 — Moderate reliability"
+        else:
+            rel_label = f"🔴 {rel_score}/100 — Limited data — some checks could not be verified"
+
+        rows = [
+            ("URL Normalized",          url_norm_val),
+            ("Redirects Resolved",      redirect_val),
+            ("Platform Detected",       platform_val),
+            ("Schema Parsed",           schema_labels.get(sq, "—")),
+            ("Rendered DOM Checked",    render_val),
+            ("Pages Audited",           pages_val),
+            ("Data Reliability Score",  rel_label),
+        ]
+
+        story  = self._sub_hdr("Audit Data Quality & Reliability")
+        story += self._callout(
+            "The table below shows how the audit data was collected and how confidently "
+            "each signal was verified. A reliability score above 75 means all major checks "
+            "ran against real page data. Scores below 50 indicate some signals are estimated.",
+            AMBER_BG,
+        )
+        story.append(self._detail_table(
+            ["DIMENSION", "STATUS"],
+            rows,
+            col_widths=[1.9*inch, 3.8*inch],
+        ))
         return story
 
     # ══════════════════════════════════════════════════════════

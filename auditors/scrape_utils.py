@@ -44,6 +44,12 @@ try:
 except ImportError:
     REQUESTS_OK = False
 
+try:
+    from playwright.sync_api import sync_playwright
+    PLAYWRIGHT_OK = True
+except ImportError:
+    PLAYWRIGHT_OK = False
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  HTTP fetch helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -581,12 +587,137 @@ def get_headings(soup: Optional[Any], platform: str = "unknown") -> Dict:
         return {"h1s": [], "h2s": [], "detected": False}
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  Visible text extraction (filters noise — nav/footer/scripts/JSON blobs)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Tags whose entire content subtree is excluded from primary body text
+_NOISE_TAGS: frozenset = frozenset({
+    "script", "style", "noscript", "iframe",
+    "nav", "footer", "header",
+    "aside", "menu", "form",
+})
+
+# Inline-style patterns that indicate hidden / zero-opacity elements
+_HIDDEN_STYLE_RE = re.compile(
+    r"display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0", re.I
+)
+
+# Heuristic: a text node that looks like a JSON blob (not human-readable prose)
+_JSON_BLOB_RE = re.compile(r'^\s*[\[{]', re.S)
+
+
+def get_visible_text(soup: Optional[Any]) -> str:
+    """
+    Extract primary visible body text, filtering out:
+      - <script>, <style>, <noscript>, <iframe> content
+      - <nav>, <footer>, <header>, <aside>, <menu>, <form> chrome/repetition
+      - Elements with display:none / visibility:hidden / aria-hidden="true"
+      - JSON blobs embedded as inline text (common in Next.js / React hydration)
+
+    Uses the text-node walk (find_all(string=True)) to avoid mutating the
+    original soup and without an expensive deep-copy.
+
+    Returns a plain-text string suitable for word counting and content analysis.
+    """
+    if not soup:
+        return ""
+    try:
+        parts: List[str] = []
+        for string in soup.find_all(string=True):
+            node_text = str(string).strip()
+            if not node_text:
+                continue
+
+            # Walk ancestors — skip if any ancestor is a noise tag or hidden
+            skip = False
+            for anc in string.parents:
+                tag_name = getattr(anc, "name", None)
+                if tag_name in _NOISE_TAGS:
+                    skip = True
+                    break
+                style = anc.get("style", "") if hasattr(anc, "get") else ""
+                if style and _HIDDEN_STYLE_RE.search(style):
+                    skip = True
+                    break
+                aria = anc.get("aria-hidden", "") if hasattr(anc, "get") else ""
+                if aria == "true":
+                    skip = True
+                    break
+            if skip:
+                continue
+
+            # Drop JSON / data blobs (>80 chars, starts with { or [)
+            if len(node_text) > 80 and _JSON_BLOB_RE.match(node_text):
+                continue
+
+            parts.append(node_text)
+
+        return " ".join(parts)
+    except Exception:
+        # Fallback to raw text on any error
+        return soup.get_text(separator=" ") if soup else ""
+
+
 def get_word_count(soup: Optional[Any]) -> int:
-    """Estimate visible word count from page body text."""
+    """
+    Estimate visible word count from primary page body text.
+
+    Uses get_visible_text() to exclude scripts, nav/footer chrome, hidden
+    elements, and embedded JSON blobs — producing a count that reflects only
+    human-readable content.
+    """
     if not soup:
         return 0
     try:
-        text = soup.get_text(separator=" ")
-        return len(re.findall(r"\b\w{2,}\b", text))
+        text = get_visible_text(soup)
+        return len(re.findall(r"\b[a-zA-Z]{2,}\b", text))
     except Exception:
         return 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Headless browser rendering (Playwright — optional)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def render_page(
+    url: str,
+    timeout_ms: int = 15_000,
+) -> Tuple[Optional[str], str]:
+    """
+    Render a page with a headless Chromium browser (Playwright) and return
+    the fully-rendered HTML after JavaScript execution.
+
+    Call this when raw-HTML scraping returns empty technical signals on a
+    site suspected of client-side rendering (React / Vue SPA detected).
+
+    Attempt sequence:
+      1. Navigate to URL (Chrome UA, 1280×800 viewport)
+      2. Wait for DOMContentLoaded
+      3. Best-effort networkidle wait (5 s cap — times out silently)
+      4. Capture page.content() (post-JS DOM)
+
+    Returns (rendered_html, "ok") on success.
+    Returns (None, error_message) if Playwright is unavailable or the render
+    fails.  Never raises.
+    """
+    if not PLAYWRIGHT_OK:
+        return None, "playwright not installed"
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            ctx = browser.new_context(
+                user_agent=_HEADERS_CHROME["User-Agent"],
+                viewport={"width": 1280, "height": 800},
+            )
+            page = ctx.new_page()
+            page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            try:
+                page.wait_for_load_state("networkidle", timeout=5_000)
+            except Exception:
+                pass   # networkidle timeout is acceptable — use current DOM
+            html = page.content()
+            browser.close()
+        return html, "ok"
+    except Exception as exc:
+        return None, str(exc)
