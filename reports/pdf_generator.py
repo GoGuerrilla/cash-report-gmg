@@ -440,6 +440,13 @@ class PDFReportGenerator:
         import logging as _logging
         _log = _logging.getLogger("webhook")
         os.makedirs(os.path.dirname(os.path.abspath(output_path)) or ".", exist_ok=True)
+
+        # Point Playwright at the browser installed to the app directory during build.
+        # On Railway, /root/.cache is NOT persisted — browsers must live under /app/.
+        if not os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
+            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "/app/ms-playwright"
+        _log.info("PDF: PLAYWRIGHT_BROWSERS_PATH=%s", os.environ.get("PLAYWRIGHT_BROWSERS_PATH"))
+
         try:
             from playwright.sync_api import sync_playwright
         except ImportError:
