@@ -454,53 +454,6 @@ def _safe_audit_timed(label: str, fn, default: dict) -> tuple:
     return result, elapsed
 
 
-def _send_acknowledgment_email(to_addr: str, client_name: str) -> None:
-    """
-    Fire an immediate acknowledgment email as soon as the audit thread starts.
-    Uses SendGrid directly (no PDF attachment needed). Never raises.
-    Gives the client sub-5-second confirmation that their submission was received.
-    """
-    import urllib.request, urllib.error
-    sg_key    = os.environ.get("SENDGRID_API_KEY", "").strip()
-    from_addr = (os.environ.get("SENDGRID_FROM_EMAIL")
-                 or os.environ.get("REPORT_EMAIL_FROM", "")).strip()
-    if not sg_key or not from_addr or not to_addr:
-        log.warning("ACK email skipped — missing SendGrid key, from, or to address")
-        return
-    subject = f"We received your C.A.S.H. Report request for {client_name}"
-    body = (
-        f"Hi,\n\n"
-        f"We received your C.A.S.H. Report request for {client_name}.\n\n"
-        f"Your full report is being generated now. This typically takes 3–5 minutes "
-        f"while we audit your website, SEO, social channels, and competitive landscape.\n\n"
-        f"We'll email you the complete PDF report as soon as it's ready.\n\n"
-        f"In the meantime, if you have questions reach us at: gmg@goguerrilla.xyz\n\n"
-        f"— C.A.S.H. Report by GMG · goguerrilla.xyz"
-    )
-    payload = json.dumps({
-        "personalizations": [{"to": [{"email": to_addr}]}],
-        "from":    {"email": from_addr},
-        "subject": subject,
-        "content": [{"type": "text/plain", "value": body}],
-    }).encode()
-    req = urllib.request.Request(
-        "https://api.sendgrid.com/v3/mail/send",
-        data=payload,
-        headers={"Authorization": f"Bearer {sg_key}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        t0 = time.time()
-        with urllib.request.urlopen(req, timeout=10) as r:
-            elapsed = round(time.time() - t0, 3)
-            log.info("TIMING  ack_email_sendgrid      %.2fs  status=%d → %s",
-                     elapsed, r.status, to_addr)
-    except urllib.error.HTTPError as e:
-        body_err = e.read().decode("utf-8", errors="replace")[:200]
-        log.error("ACK email SendGrid error HTTP %d: %s", e.code, body_err)
-    except Exception as exc:
-        log.error("ACK email failed: %s", exc)
-
 
 # ══════════════════════════════════════════════════════════════════
 #  CORE AUDIT RUNNER  (generalized — works for any client)
@@ -514,22 +467,15 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
     Runs in a background thread — never called synchronously from Flask.
 
     Pipeline (with timing):
-      Phase 0 : Acknowledgment email (< 3s — fires immediately)
       Phase 1 : Social data collection — Linktree, LinkedIn, YouTube, Meta (sequential)
       Phase 2 : Website + SEO + GBP + Analytics in PARALLEL
       Phase 3 : GEO (needs SEO output), then Social/Brand/Funnel/ICP/Freshness/
                 Content/Competitor all in PARALLEL
-      Phase 4 : AI synthesis → PDF → DOCX → Report email
+      Phase 4 : AI synthesis → PDF → DOCX → Report email (single email, PDF attached)
     """
     audit_wall_start = time.time()
     name = config.client_name
     log.info("=== AUDIT START: %s  [%s] ===", name, datetime.utcnow().isoformat())
-
-    # ── Phase 0: Acknowledgment email (fires before any scraping) ─
-    _t = time.time()
-    if contact_email:
-        _send_acknowledgment_email(contact_email, name)
-    log.info("TIMING  phase0_ack_email        %.2fs", time.time() - _t)
 
     # ── Channel data skeleton ─────────────────────────────────────
     channel_data = _build_base_channel_data(config.website_url or config.linktree_url or "")

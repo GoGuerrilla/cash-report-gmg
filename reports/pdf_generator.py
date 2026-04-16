@@ -459,7 +459,7 @@ class PDFReportGenerator:
                 browser = pw.chromium.launch(args=["--no-sandbox", "--disable-setuid-sandbox"])
                 _log.info("PDF: Chromium launched OK")
                 page = browser.new_page()
-                page.goto(f"file://{tmp.name}", wait_until="networkidle")
+                page.goto(f"file://{tmp.name}", wait_until="networkidle", timeout=60_000)
                 page.wait_for_timeout(500)
                 page.pdf(path=output_path, width="794px", height="1123px",
                          print_background=True,
