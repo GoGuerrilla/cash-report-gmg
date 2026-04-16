@@ -532,7 +532,7 @@ class GEOAuditor:
             strengths.append("✅ Canonical tag present — prevents duplicate content signals")
         else:
             score -= 5
-            issues.append("🟡 No canonical tag — add <link rel='canonical'> to prevent duplicate content")
+            issues.append("🟡 No canonical tag — add a canonical link element to prevent duplicate content")
 
         # ── Indexability ───────────────────────────────────────
         if op.get("is_noindex"):

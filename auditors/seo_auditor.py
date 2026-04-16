@@ -173,9 +173,13 @@ class SEOAuditor:
         dq["reliability_score"] = _compute_reliability(dq)
         crawl["data_quality"]   = dq
 
-        # ── Step 2: PageSpeed API (optional) ──────────────────
-        psi_mobile  = self._fetch_pagespeed("mobile")
-        psi_desktop = self._fetch_pagespeed("desktop")
+        # ── Step 2: PageSpeed API (optional, mobile + desktop in parallel) ──
+        import concurrent.futures as _cf
+        with _cf.ThreadPoolExecutor(max_workers=2) as _ex:
+            _fut_m = _ex.submit(self._fetch_pagespeed, "mobile")
+            _fut_d = _ex.submit(self._fetch_pagespeed, "desktop")
+            psi_mobile  = _fut_m.result()
+            psi_desktop = _fut_d.result()
         psi = psi_mobile or psi_desktop
 
         if not psi:

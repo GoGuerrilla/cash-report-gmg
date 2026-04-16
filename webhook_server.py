@@ -58,6 +58,7 @@ Rate limiting
   audit.  Blocked submissions receive a friendly rejection email.
 """
 
+import concurrent.futures
 import hashlib
 import hmac
 import json
@@ -66,6 +67,7 @@ import os
 import re
 import sys
 import threading
+import time
 import traceback
 from datetime import datetime
 
@@ -439,6 +441,67 @@ def _safe_audit(label: str, fn, default: dict) -> dict:
 _NEUTRAL = {"score": 50, "grade": "C", "issues": [], "strengths": []}
 
 
+def _safe_audit_timed(label: str, fn, default: dict) -> tuple:
+    """Run an auditor, return (result, elapsed_seconds). Falls back to default on error."""
+    t0 = time.time()
+    try:
+        result = fn()
+    except Exception as exc:
+        log.warning("Auditor [%s] failed — using neutral default. Error: %s", label, exc)
+        result = default
+    elapsed = round(time.time() - t0, 2)
+    log.info("TIMING  %-20s  %.2fs", label, elapsed)
+    return result, elapsed
+
+
+def _send_acknowledgment_email(to_addr: str, client_name: str) -> None:
+    """
+    Fire an immediate acknowledgment email as soon as the audit thread starts.
+    Uses SendGrid directly (no PDF attachment needed). Never raises.
+    Gives the client sub-5-second confirmation that their submission was received.
+    """
+    import urllib.request, urllib.error
+    sg_key    = os.environ.get("SENDGRID_API_KEY", "").strip()
+    from_addr = (os.environ.get("SENDGRID_FROM_EMAIL")
+                 or os.environ.get("REPORT_EMAIL_FROM", "")).strip()
+    if not sg_key or not from_addr or not to_addr:
+        log.warning("ACK email skipped — missing SendGrid key, from, or to address")
+        return
+    subject = f"We received your C.A.S.H. Report request for {client_name}"
+    body = (
+        f"Hi,\n\n"
+        f"We received your C.A.S.H. Report request for {client_name}.\n\n"
+        f"Your full report is being generated now. This typically takes 3–5 minutes "
+        f"while we audit your website, SEO, social channels, and competitive landscape.\n\n"
+        f"We'll email you the complete PDF report as soon as it's ready.\n\n"
+        f"In the meantime, if you have questions reach us at: gmg@goguerrilla.xyz\n\n"
+        f"— C.A.S.H. Report by GMG · goguerrilla.xyz"
+    )
+    payload = json.dumps({
+        "personalizations": [{"to": [{"email": to_addr}]}],
+        "from":    {"email": from_addr},
+        "subject": subject,
+        "content": [{"type": "text/plain", "value": body}],
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.sendgrid.com/v3/mail/send",
+        data=payload,
+        headers={"Authorization": f"Bearer {sg_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        t0 = time.time()
+        with urllib.request.urlopen(req, timeout=10) as r:
+            elapsed = round(time.time() - t0, 3)
+            log.info("TIMING  ack_email_sendgrid      %.2fs  status=%d → %s",
+                     elapsed, r.status, to_addr)
+    except urllib.error.HTTPError as e:
+        body_err = e.read().decode("utf-8", errors="replace")[:200]
+        log.error("ACK email SendGrid error HTTP %d: %s", e.code, body_err)
+    except Exception as exc:
+        log.error("ACK email failed: %s", exc)
+
+
 # ══════════════════════════════════════════════════════════════════
 #  CORE AUDIT RUNNER  (generalized — works for any client)
 # ══════════════════════════════════════════════════════════════════
@@ -448,11 +511,25 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
                       ip_address: str | None):
     """
     Full CASH audit for a client config built from Typeform intake.
-    Mirrors run_goguerrilla.run_audit() but is config-driven, not GMG-hardcoded.
     Runs in a background thread — never called synchronously from Flask.
+
+    Pipeline (with timing):
+      Phase 0 : Acknowledgment email (< 3s — fires immediately)
+      Phase 1 : Social data collection — Linktree, LinkedIn, YouTube, Meta (sequential)
+      Phase 2 : Website + SEO + GBP + Analytics in PARALLEL
+      Phase 3 : GEO (needs SEO output), then Social/Brand/Funnel/ICP/Freshness/
+                Content/Competitor all in PARALLEL
+      Phase 4 : AI synthesis → PDF → DOCX → Report email
     """
+    audit_wall_start = time.time()
     name = config.client_name
-    log.info("=== Starting CASH audit for: %s ===", name)
+    log.info("=== AUDIT START: %s  [%s] ===", name, datetime.utcnow().isoformat())
+
+    # ── Phase 0: Acknowledgment email (fires before any scraping) ─
+    _t = time.time()
+    if contact_email:
+        _send_acknowledgment_email(contact_email, name)
+    log.info("TIMING  phase0_ack_email        %.2fs", time.time() - _t)
 
     # ── Channel data skeleton ─────────────────────────────────────
     channel_data = _build_base_channel_data(config.website_url or config.linktree_url or "")
@@ -460,20 +537,26 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
 
     audit_data: dict = {}
 
+    # ══ Phase 1: Social data collection (sequential — each step ══
+    #             feeds into channel_data used by later auditors)   ══
+    phase1_start = time.time()
+
     # ── 1a. Linktree / website social scrape ─────────────────────
     linktree_data = {}
     if config.linktree_url:
         log.info("Scraping Linktree: %s", config.linktree_url)
+        _t = time.time()
         linktree_data = LinktreeScraper(config.linktree_url).scrape()
+        log.info("TIMING  linktree_scrape         %.2fs", time.time() - _t)
     elif config.website_url:
         log.info("Scraping website socials: %s", config.website_url)
-        # Use the website scraper from questionnaire as fallback
+        _t = time.time()
         from intake.questionnaire import _scrape_website_socials, _classified_to_platforms
         classified = _scrape_website_socials(config.website_url)
+        log.info("TIMING  website_socials_scrape  %.2fs", time.time() - _t)
         if classified:
             platforms   = list(classified.keys())
             plat_data   = _classified_to_platforms(classified)
-            # Populate config social handles from scraped data
             if plat_data.get("linkedin_url"):
                 config.linkedin_url = plat_data["linkedin_url"]
             if plat_data.get("instagram_handle"):
@@ -512,7 +595,9 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
     # ── 1b. LinkedIn scrape ───────────────────────────────────────
     if config.linkedin_url:
         log.info("Scraping LinkedIn: %s", config.linkedin_url)
+        _t = time.time()
         li_data = _li_scraper.scrape(config.linkedin_url)
+        log.info("TIMING  linkedin_scrape         %.2fs", time.time() - _t)
         src = li_data.get("data_source", "unknown")
         if src == "linkedin_html":
             for key in ("followers", "posts_per_week", "days_since_last_post",
@@ -526,11 +611,13 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
 
     # ── 1c. YouTube ───────────────────────────────────────────────
     if config.youtube_channel_url:
-        log.info("Fetching YouTube data...")
         yt_key = os.environ.get("YOUTUBE_API_KEY", "")
         if yt_key:
+            log.info("Fetching YouTube data...")
+            _t = time.time()
             from auditors.youtube_api import YouTubeAuditor
             yt = YouTubeAuditor(config.youtube_channel_url, yt_key).fetch()
+            log.info("TIMING  youtube_api             %.2fs", time.time() - _t)
             if yt.get("data_source") == "youtube_data_api":
                 for key in ("posts_per_week", "days_since_last_post", "is_active"):
                     if yt.get(key) is not None:
@@ -543,6 +630,7 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
     meta_pg_tok = os.environ.get("META_PAGE_ACCESS_TOKEN", "").strip()
     if meta_app_id and meta_secret:
         log.info("Fetching Meta API data...")
+        _t = time.time()
         fb_page = ""
         if config.facebook_page_url:
             m = re.search(r"facebook\.com/([^/?#]+)", config.facebook_page_url, re.I)
@@ -554,6 +642,7 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
             instagram_handle=config.instagram_handle,
             page_access_token=meta_pg_tok,
         ).fetch()
+        log.info("TIMING  meta_api                %.2fs", time.time() - _t)
         fb = meta_result.get("facebook", {})
         ig = meta_result.get("instagram", {})
         if fb.get("data_source") == "meta_graph_api":
@@ -570,105 +659,127 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
             channel_data["instagram"]["is_active"] = True
         audit_data["meta"] = meta_result
 
-    # ── 2. Website & SEO ──────────────────────────────────────────
+    log.info("TIMING  PHASE1_social_collection  %.2fs", time.time() - phase1_start)
+
+    # ══ Phase 2: Website + SEO + GBP + Analytics in PARALLEL ══════
+    #   These all need only the URL / config — no cross-dependencies.
+    #   SEO is the bottleneck (PageSpeed mobile+desktop, now parallel).
+    phase2_start = time.time()
+
     target_url = config.website_url
     if not target_url and linktree_data.get("website_url"):
         target_url = linktree_data["website_url"]
     if not target_url:
         target_url = ""
 
+    pagespeed_key = os.environ.get("PAGESPEED_API_KEY", "")
+    places_key    = os.environ.get("GOOGLE_PLACES_API_KEY", pagespeed_key)
+    ga_prop       = os.environ.get("GOOGLE_ANALYTICS_PROPERTY_ID", "")
+    ga_sa         = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON_PATH", "")
+    if ga_sa and not os.path.isfile(ga_sa):
+        log.warning("GA service account file not found at %r — skipping GA (score=50)", ga_sa)
+        ga_sa = ""
+
+    _ga_neutral = {
+        "score": 50, "grade": "C", "data_source": "not_available",
+        "note": "Google Analytics unavailable — score set to neutral.",
+        "monthly_visitors": None, "traffic_trend_pct": None,
+        "traffic_trend_label": "—", "bounce_rate_pct": None,
+        "avg_session_duration": "—", "top_traffic_sources": [],
+        "top_landing_pages": [], "issues": [], "strengths": [],
+    }
+
     if target_url:
-        log.info("Auditing website: %s", target_url)
-        audit_data["website"] = _safe_audit(
-            "website", lambda: WebsiteAuditor(target_url, max_pages=5).run(), _NEUTRAL)
+        log.info("Phase 2: launching Website + SEO + GBP + Analytics in parallel...")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
+            fut_web = ex.submit(_safe_audit_timed, "website",
+                                lambda: WebsiteAuditor(target_url, max_pages=5).run(), _NEUTRAL)
+            fut_seo = ex.submit(_safe_audit_timed, "seo",
+                                lambda: SEOAuditor(target_url, api_key=pagespeed_key).run(), _NEUTRAL)
+            fut_gbp = ex.submit(_safe_audit_timed, "gbp",
+                                lambda: GBPAuditor(business_name=name, website_url=target_url,
+                                                   api_key=places_key).run(), _NEUTRAL)
+            fut_ga  = ex.submit(_safe_audit_timed, "analytics",
+                                lambda: AnalyticsAuditor(property_id=ga_prop,
+                                                         service_account_json_path=ga_sa).run(),
+                                _ga_neutral)
+            audit_data["website"],    _ = fut_web.result()
+            audit_data["seo"],        _ = fut_seo.result()
+            audit_data["gbp"],        _ = fut_gbp.result()
+            audit_data["analytics"],  _ = fut_ga.result()
+
         _merge_website_data(channel_data, audit_data["website"])
 
-        log.info("Auditing SEO...")
-        pagespeed_key = os.environ.get("PAGESPEED_API_KEY", "")
-        audit_data["seo"] = _safe_audit(
-            "seo", lambda: SEOAuditor(target_url, api_key=pagespeed_key).run(), _NEUTRAL)
-
-        log.info("Auditing GEO / Search Console...")
-        audit_data["geo"] = _safe_audit(
+        # GEO depends on SEO output — runs after Phase 2 completes
+        _t = time.time()
+        audit_data["geo"], _ = _safe_audit_timed(
             "geo", lambda: GEOAuditor(config, audit_data.get("seo", {})).run(), _NEUTRAL)
-
-        log.info("Auditing GBP...")
-        places_key = os.environ.get("GOOGLE_PLACES_API_KEY",
-                                     os.environ.get("PAGESPEED_API_KEY", ""))
-        audit_data["gbp"] = _safe_audit(
-            "gbp", lambda: GBPAuditor(
-                business_name=name, website_url=target_url, api_key=places_key).run(),
-            _NEUTRAL)
-
-        log.info("Fetching Analytics...")
-        ga_prop = os.environ.get("GOOGLE_ANALYTICS_PROPERTY_ID", "")
-        ga_sa   = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON_PATH", "")
-        if ga_sa and not os.path.isfile(ga_sa):
-            log.warning("GA service account file not found at %r — skipping GA (score=50)", ga_sa)
-            ga_sa = ""
-        _ga_neutral = {
-            "score": 50, "grade": "C", "data_source": "not_available",
-            "note": "Google Analytics unavailable — score set to neutral.",
-            "monthly_visitors": None, "traffic_trend_pct": None,
-            "traffic_trend_label": "—", "bounce_rate_pct": None,
-            "avg_session_duration": "—", "top_traffic_sources": [],
-            "top_landing_pages": [], "issues": [], "strengths": [],
-        }
-        audit_data["analytics"] = _safe_audit(
-            "analytics",
-            lambda: AnalyticsAuditor(
-                property_id=ga_prop, service_account_json_path=ga_sa).run(),
-            _ga_neutral)
+        log.info("TIMING  geo_after_seo           %.2fs", time.time() - _t)
     else:
         log.warning("No website URL — skipping website/SEO/GEO/GBP/analytics auditors")
         for key in ("website", "seo", "geo", "gbp", "analytics"):
             audit_data[key] = {"note": "No website URL provided", "score": 50}
 
-    # ── 3–10. All remaining auditors ─────────────────────────────
-    log.info("Auditing social channels...")
-    audit_data["social"] = _safe_audit(
-        "social", lambda: SocialMediaAuditor(config).run(), _NEUTRAL)
+    log.info("TIMING  PHASE2_web_seo_parallel   %.2fs", time.time() - phase2_start)
 
-    log.info("Auditing content efficiency...")
-    audit_data["content"] = _safe_audit(
-        "content", lambda: ContentAuditor(config, audit_data).run(), _NEUTRAL)
+    # ══ Phase 3: Independent auditors in PARALLEL ═════════════════
+    #   All depend only on config + linktree_data (already complete).
+    #   Competitor also needs audit_data but only reads website/seo.
+    phase3_start = time.time()
+    log.info("Phase 3: launching Social + Brand + Funnel + ICP + Freshness + "
+             "Content + Competitor in parallel...")
 
-    log.info("Auditing brand consistency...")
-    audit_data["brand"] = _safe_audit(
-        "brand", lambda: BrandAuditor(config, linktree_data).run(), _NEUTRAL)
+    _comp_default = {"skipped": True, "note": "Competitor audit failed.",
+                     "competitors": [], "comparison": {}}
 
-    log.info("Auditing lead funnel...")
-    audit_data["funnel"] = _safe_audit(
-        "funnel", lambda: FunnelAuditor(config, linktree_data).run(), _NEUTRAL)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=7) as ex:
+        fut_social   = ex.submit(_safe_audit_timed, "social",
+                                 lambda: SocialMediaAuditor(config).run(), _NEUTRAL)
+        fut_brand    = ex.submit(_safe_audit_timed, "brand",
+                                 lambda: BrandAuditor(config, linktree_data).run(), _NEUTRAL)
+        fut_funnel   = ex.submit(_safe_audit_timed, "funnel",
+                                 lambda: FunnelAuditor(config, linktree_data).run(), _NEUTRAL)
+        fut_icp      = ex.submit(_safe_audit_timed, "icp",
+                                 lambda: ICPAuditor(config, linktree_data).run(), _NEUTRAL)
+        fut_fresh    = ex.submit(_safe_audit_timed, "freshness",
+                                 lambda: FreshnessAuditor(config, linktree_data).run(), _NEUTRAL)
+        fut_content  = ex.submit(_safe_audit_timed, "content",
+                                 lambda: ContentAuditor(config, audit_data).run(), _NEUTRAL)
+        if config.competitor_urls:
+            fut_comp = ex.submit(_safe_audit_timed, "competitor",
+                                 lambda: CompetitorAuditor(config, audit_data,
+                                                           pagespeed_api_key=pagespeed_key).run(),
+                                 _comp_default)
+        else:
+            fut_comp = None
 
-    log.info("Auditing ICP alignment...")
-    audit_data["icp"] = _safe_audit(
-        "icp", lambda: ICPAuditor(config, linktree_data).run(), _NEUTRAL)
+        audit_data["social"],    _ = fut_social.result()
+        audit_data["brand"],     _ = fut_brand.result()
+        audit_data["funnel"],    _ = fut_funnel.result()
+        audit_data["icp"],       _ = fut_icp.result()
+        audit_data["freshness"], _ = fut_fresh.result()
+        audit_data["content"],   _ = fut_content.result()
+        if fut_comp:
+            audit_data["competitor"], _ = fut_comp.result()
+        else:
+            audit_data["competitor"] = {
+                "skipped": True, "note": "No competitor URLs provided.",
+                "competitors": [], "comparison": {},
+            }
 
-    log.info("Auditing content freshness...")
-    audit_data["freshness"] = _safe_audit(
-        "freshness", lambda: FreshnessAuditor(config, linktree_data).run(), _NEUTRAL)
+    log.info("TIMING  PHASE3_parallel_auditors  %.2fs", time.time() - phase3_start)
 
-    if config.competitor_urls:
-        log.info("Auditing competitors: %s", config.competitor_urls)
-        pagespeed_key = os.environ.get("PAGESPEED_API_KEY", "")
-        audit_data["competitor"] = _safe_audit(
-            "competitor", lambda: CompetitorAuditor(
-                config, audit_data, pagespeed_api_key=pagespeed_key).run(),
-            {"skipped": True, "note": "Competitor audit failed.", "competitors": [], "comparison": {}})
-    else:
-        audit_data["competitor"] = {
-            "skipped": True, "note": "No competitor URLs provided.",
-            "competitors": [], "comparison": {},
-        }
+    # ══ Phase 4: AI synthesis → PDF → DOCX → Email ═══════════════
+    phase4_start = time.time()
 
     log.info("Running AI synthesis...")
+    _t = time.time()
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
     audit_data["ai_insights"] = AIAnalyzer(anthropic_api_key=anthropic_key).analyze(
         config, audit_data
     )
+    log.info("TIMING  ai_synthesis            %.2fs", time.time() - _t)
 
-    # ── Score summary ─────────────────────────────────────────────
     ai            = audit_data.get("ai_insights", {})
     overall_score = ai.get("overall_score")
     overall_grade = ai.get("overall_grade", "")
@@ -682,56 +793,63 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
     slug     = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
     pdf_path = os.path.abspath(f"reports/{slug}_cash_report.pdf")
 
-    log.info("Generating PDF: %s", pdf_path)
+    _t = time.time()
     try:
         PDFReportGenerator(config, audit_data).generate(pdf_path)
         if os.path.isfile(pdf_path):
-            log.info("PDF saved: %s (%d bytes)", pdf_path, os.path.getsize(pdf_path))
+            log.info("TIMING  pdf_generation          %.2fs  (%d bytes)",
+                     time.time() - _t, os.path.getsize(pdf_path))
             _archive_report(pdf_path, name)
         else:
             log.error("PDF generation ran but file not found at: %s", pdf_path)
     except Exception as pdf_err:
-        log.error("PDF generation failed: %s", pdf_err)
+        log.error("PDF generation FAILED (%.2fs): %s\n%s",
+                  time.time() - _t, pdf_err, traceback.format_exc())
         pdf_path = None
 
     # ── Generate DOCX backup ──────────────────────────────────────
     docx_path = os.path.abspath(f"reports/{slug}_cash_report.docx")
+    _t = time.time()
     try:
         DocxReportGenerator(config, audit_data).generate(docx_path)
-        log.info("DOCX backup saved: %s", docx_path)
+        log.info("TIMING  docx_generation         %.2fs", time.time() - _t)
     except Exception as e:
-        log.warning("DOCX backup failed (non-fatal): %s", e)
+        log.warning("DOCX backup failed (%.2fs): %s", time.time() - _t, e)
 
     # ── Email report ──────────────────────────────────────────────
-    log.info("=== EMAIL DELIVERY ===")
+    email_trigger_ts = datetime.utcnow().isoformat()
+    log.info("=== EMAIL DELIVERY TRIGGERED at %s ===", email_trigger_ts)
     log.info("SENDGRID_API_KEY   : %s",
              f"set ({len(os.environ.get('SENDGRID_API_KEY',''))} chars)"
              if os.environ.get("SENDGRID_API_KEY") else "NOT SET")
-    log.info("SENDGRID_FROM_EMAIL: %s",
-             os.environ.get("SENDGRID_FROM_EMAIL") or "NOT SET")
-    log.info("REPORT_EMAIL_FROM  : %s",
-             os.environ.get("REPORT_EMAIL_FROM") or "NOT SET")
-    log.info("REPORT_EMAIL_TO    : %s",
-             os.environ.get("REPORT_EMAIL_TO") or "NOT SET")
     log.info("PDF for attachment : %s  exists=%s",
              pdf_path, os.path.isfile(pdf_path) if pdf_path else False)
 
     # 1. Send to the client
+    client_email_ok = False
     if contact_email:
-        log.info("Sending report to client: %s", contact_email)
-        ok = send_report(
+        _t = time.time()
+        log.info("TIMING  sendgrid_trigger_start  → %s", contact_email)
+        client_email_ok = send_report(
             report_path   = pdf_path,
             client_name   = name,
             overall_score = overall_score,
             overall_grade = overall_grade,
             to_addr       = contact_email,
         )
-        log.info("Client email result: %s", "SUCCESS" if ok else "FAILED")
+        log.info("TIMING  sendgrid_client_send    %.2fs  result=%s",
+                 time.time() - _t, "SUCCESS" if client_email_ok else "FAILED")
+        if not client_email_ok:
+            log.error(
+                "CLIENT EMAIL FAILED — client %r (%s) did NOT receive their report. "
+                "PDF at: %s. Fix SENDGRID_API_KEY or REPORT_EMAIL_PASSWORD and resend manually.",
+                name, contact_email, pdf_path,
+            )
 
     # 2. Always send a copy to the GMG team inbox
     gmg_inbox = os.environ.get("REPORT_EMAIL_TO", "")
     if gmg_inbox and gmg_inbox != contact_email:
-        log.info("Sending copy to GMG team: %s", gmg_inbox)
+        _t = time.time()
         ok2 = send_report(
             report_path   = pdf_path,
             client_name   = name,
@@ -739,10 +857,18 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
             overall_grade = overall_grade,
             to_addr       = gmg_inbox,
         )
-        log.info("GMG team email result: %s", "SUCCESS" if ok2 else "FAILED")
+        log.info("TIMING  sendgrid_gmg_send       %.2fs  result=%s",
+                 time.time() - _t, "SUCCESS" if ok2 else "FAILED")
+        if not ok2:
+            log.error(
+                "GMG TEAM EMAIL FAILED — team copy for client %r not delivered to %s.",
+                name, gmg_inbox,
+            )
+
+    log.info("TIMING  PHASE4_ai_pdf_email       %.2fs", time.time() - phase4_start)
 
     # ── Save to DB ────────────────────────────────────────────────
-    log.info("Saving to cash_clients.db...")
+    _t = time.time()
     try:
         row_id = save_audit_result(
             client_name   = name,
@@ -753,9 +879,9 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
             ai_insights   = audit_data.get("ai_insights", {}),
             report_path   = pdf_path,
         )
-        log.info("DB saved (row #%s)", row_id)
+        log.info("TIMING  db_save                 %.2fs  row=#%s", time.time() - _t, row_id)
     except Exception as e:
-        log.warning("DB save failed: %s", e)
+        log.warning("DB save failed (%.2fs): %s", time.time() - _t, e)
 
     # ── Log rate limit ────────────────────────────────────────────
     try:
@@ -763,7 +889,9 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
     except Exception:
         pass
 
-    log.info("=== Audit complete for: %s ===", name)
+    total_elapsed = round(time.time() - audit_wall_start, 1)
+    log.info("=== AUDIT COMPLETE: %s  wall_time=%.1fs  [%s] ===",
+             name, total_elapsed, datetime.utcnow().isoformat())
 
 
 def _audit_thread(config: ClientConfig, rl: RateLimiter,

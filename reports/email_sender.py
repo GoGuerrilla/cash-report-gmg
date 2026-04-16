@@ -246,14 +246,30 @@ def send_report(
     # ── Send ──────────────────────────────────────────────────────
     if sg_key:
         log.info("Email: using SendGrid")
-        return _send_sendgrid(sg_key, from_addr, to_addr, subject, body,
-                              report_path, teaser_path)
+        ok = _send_sendgrid(sg_key, from_addr, to_addr, subject, body,
+                            report_path, teaser_path)
+        if ok:
+            return True
+        # SendGrid failed — attempt SMTP fallback if configured
+        if password:
+            log.warning("SendGrid failed — falling back to SMTP (%s:%d)", smtp_host, smtp_port)
+            smtp_ok = _send_smtp(from_addr, password, to_addr, subject, body,
+                                 smtp_host, smtp_port, report_path, teaser_path)
+            if smtp_ok:
+                return True
+        log.error("EMAIL DELIVERY FAILED for %s — SendGrid returned error AND no SMTP fallback succeeded. "
+                  "Check SENDGRID_API_KEY validity and REPORT_EMAIL_PASSWORD.", to_addr)
+        return False
 
     if password:
-        log.info("Email: using SMTP fallback (%s:%d)", smtp_host, smtp_port)
-        return _send_smtp(from_addr, password, to_addr, subject, body,
-                          smtp_host, smtp_port, report_path, teaser_path)
+        log.info("Email: using SMTP (%s:%d)", smtp_host, smtp_port)
+        ok = _send_smtp(from_addr, password, to_addr, subject, body,
+                        smtp_host, smtp_port, report_path, teaser_path)
+        if not ok:
+            log.error("EMAIL DELIVERY FAILED for %s — SMTP authentication or send error. "
+                      "Verify REPORT_EMAIL_PASSWORD is a valid Gmail App Password.", to_addr)
+        return ok
 
-    log.error("Email skipped — no delivery method configured. "
-              "Set SENDGRID_API_KEY (recommended) or REPORT_EMAIL_PASSWORD on Railway.")
+    log.error("EMAIL DELIVERY FAILED — no delivery method configured. "
+              "Set SENDGRID_API_KEY (recommended) or REPORT_EMAIL_PASSWORD.")
     return False
