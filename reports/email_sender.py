@@ -54,7 +54,7 @@ def _body_text(client_name: str, overall_score, overall_grade) -> str:
         f"A GMG strategist is already reviewing your results and will be reaching out "
         f"with key insights and opportunities tailored to your business.\n\n"
         f"If you'd prefer to get ahead and start the conversation sooner, you can "
-        f"schedule your strategy session here:\n\n"
+        f"schedule your strategy session here:\n"
         f"www.gogmg.net/meeting"
     )
 
@@ -240,7 +240,7 @@ def send_report(
         log.error("Email skipped — PDF not found at: %s", report_path)
         return False
 
-    subject = f"Your C.A.S.H. Report for {client_name} is Ready"
+    subject = f"Your C.A.S.H. Report is Ready — {client_name}"
     body    = _body_text(client_name, overall_score, overall_grade)
 
     # ── Send ──────────────────────────────────────────────────────
