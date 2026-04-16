@@ -3,8 +3,7 @@ nixPkgs = ["python39"]
 
 [phases.install]
 cmds = [
-  "pip install -r requirements.txt",
-  "PLAYWRIGHT_BROWSERS_PATH=/app/ms-playwright python3 -m playwright install chromium --with-deps"
+  "pip install -r requirements.txt"
 ]
 
 [start]

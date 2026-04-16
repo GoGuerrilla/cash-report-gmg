@@ -80,6 +80,40 @@ try:
 except ImportError:
     pass
 
+# ── Playwright Chromium bootstrap ─────────────────────────────────
+# Railway's build phase doesn't persist /root/.cache into the final
+# image, so we install Chromium once at process startup and cache it
+# under /app/ms-playwright (inside the app dir, always writable).
+def _ensure_chromium():
+    import subprocess
+    pw_path = "/app/ms-playwright"
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = pw_path
+    # Fast-path: check for any executable named *chrome* under pw_path
+    found = False
+    if os.path.isdir(pw_path):
+        for root, _dirs, files in os.walk(pw_path):
+            for fname in files:
+                if "chrome" in fname and os.access(os.path.join(root, fname), os.X_OK):
+                    found = True
+                    break
+            if found:
+                break
+    if found:
+        print(f"[startup] Playwright Chromium already installed at {pw_path}", flush=True)
+        return
+    print(f"[startup] Installing Playwright Chromium to {pw_path} …", flush=True)
+    env = {**os.environ, "PLAYWRIGHT_BROWSERS_PATH": pw_path}
+    result = subprocess.run(
+        [sys.executable, "-m", "playwright", "install", "chromium"],
+        env=env, capture_output=True, text=True, timeout=300,
+    )
+    if result.returncode == 0:
+        print("[startup] Playwright Chromium installed OK", flush=True)
+    else:
+        print(f"[startup] Playwright Chromium install FAILED:\n{result.stdout}\n{result.stderr}", flush=True)
+
+_ensure_chromium()
+
 # ── Logging ───────────────────────────────────────────────────────
 _log_file = os.environ.get("WEBHOOK_LOG_FILE", "")
 _handlers = [logging.StreamHandler()]
