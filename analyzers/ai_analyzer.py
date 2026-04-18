@@ -53,8 +53,15 @@ class AIAnalyzer:
         Rule-based scores are always computed from real data.
         Narrative fields come from Claude (or OpenAI) when a key is present;
         they are left empty otherwise rather than filled with invented text.
+        After AI overlay, scores are checked against rule-based values and
+        blended 50/50 if they diverge by more than 15 points.
         """
         base = self._rule_based_analysis(config, audit_data)
+
+        # Snapshot rule-based scores before any AI overlay
+        rb_scores = {k: base[k] for k in
+                     ("cash_c_score", "cash_a_score", "cash_s_score",
+                      "cash_h_score", "overall_score")}
 
         if self.anthropic_key:
             print("   → Sending audit data to Claude for narrative analysis...")
@@ -64,6 +71,7 @@ class AIAnalyzer:
                 for key, val in ai_result.items():
                     if val is not None and val != "" and val != [] and val != {}:
                         base[key] = val
+                self._check_and_blend_scores(base, rb_scores)
                 base["data_source"] = "claude"
             else:
                 print("   ⚠️  Claude response could not be parsed — scores kept, narrative empty")
@@ -75,6 +83,7 @@ class AIAnalyzer:
                 for key, val in ai_result.items():
                     if val is not None and val != "" and val != [] and val != {}:
                         base[key] = val
+                self._check_and_blend_scores(base, rb_scores)
                 base["data_source"] = "openai"
             else:
                 print("   ⚠️  OpenAI response could not be parsed — scores kept, narrative empty")
@@ -83,6 +92,44 @@ class AIAnalyzer:
             base["data_source"] = "rule_based"
 
         return base
+
+    def _check_and_blend_scores(self, result: dict, rb_scores: dict) -> None:
+        """
+        Compare AI-returned scores against rule-based scores.
+        For any CASH component or overall that deviates by more than 15 points,
+        print a warning and replace with the 50/50 blend. Mutates result in place.
+        """
+        _LABELS = {
+            "cash_c_score":  "C (Content)",
+            "cash_a_score":  "A (Audience)",
+            "cash_s_score":  "S (Sales)",
+            "cash_h_score":  "H (Retention)",
+            "overall_score": "Overall",
+        }
+        blended = []
+        for key, label in _LABELS.items():
+            rb_val = rb_scores.get(key)
+            ai_val = result.get(key)
+            if rb_val is None or ai_val is None:
+                continue
+            try:
+                rb_int, ai_int = int(rb_val), int(ai_val)
+            except (TypeError, ValueError):
+                continue
+            delta = abs(ai_int - rb_int)
+            if delta > 15:
+                blend = round((rb_int + ai_int) / 2)
+                print(
+                    f"   ⚠️  Score divergence [{label}]: "
+                    f"rule_based={rb_int}  ai={ai_int}  delta={delta}  → blending to {blend}"
+                )
+                result[key] = blend
+                blended.append(label)
+        if blended:
+            result["score_blend_note"] = (
+                f"Scores blended (>15pt divergence between rule-based and AI): "
+                f"{', '.join(blended)}"
+            )
 
     # ── Claude ────────────────────────────────────────────────
 
@@ -131,6 +178,27 @@ class AIAnalyzer:
 
     # ── Prompt ────────────────────────────────────────────────
 
+    def _format_competitor_data(self, competitor: dict) -> str:
+        """Format competitor audit findings concisely for the Claude prompt."""
+        if not competitor or competitor.get("skipped"):
+            return f"  {competitor.get('note', 'Competitor audit not run.')}"
+        lines = []
+        for comp in competitor.get("competitors", [])[:3]:
+            url       = comp.get("url", "unknown")
+            score     = comp.get("score", "?")
+            grade     = comp.get("grade", "?")
+            issues    = comp.get("issues", [])[:3]
+            strengths = comp.get("strengths", [])[:2]
+            lines.append(f"  {url}  score={score}/100 ({grade})")
+            for item in issues:
+                lines.append(f"    Issue: {item}")
+            for item in strengths:
+                lines.append(f"    Strength: {item}")
+        summary = competitor.get("comparison", {}).get("summary", "")
+        if summary:
+            lines.append(f"  Comparison summary: {summary}")
+        return "\n".join(lines) if lines else "  No competitor findings available."
+
     def _build_prompt(self, config: ClientConfig, audit_data: dict) -> str:
         cash       = self._compute_cash_scores(config, audit_data)
         web_scores = audit_data.get("website", {}).get("scores", {})
@@ -140,6 +208,7 @@ class AIAnalyzer:
         funnel     = audit_data.get("funnel", {})
         freshness  = audit_data.get("freshness", {})
         geo        = audit_data.get("geo", {})
+        competitor = audit_data.get("competitor", {})
 
         # Pull real issues from every auditor — these are the actual findings
         all_issues: List[str] = []
@@ -158,7 +227,6 @@ class AIAnalyzer:
 
         channels        = config.active_social_channels
         icp_verdict     = icp.get("icp_verdict", "")
-        api_blocked     = freshness.get("api_blocked_platforms", [])
         scraping_note   = freshness.get("scraping_note", "")
         channel_scores  = freshness.get("channels", {})
 
@@ -177,23 +245,32 @@ class AIAnalyzer:
             else:
                 freshness_lines.append(f"  {platform}: {status}")
 
+        # Fields not collected from the intake form — mark so Claude treats them
+        # as unknown rather than confirmed negatives
+        def _u(val, default, note="unverified — not in intake form"):
+            return str(val) if val != default else f"{val} ({note})"
+
         return f"""You are a senior B2B digital marketing strategist. Analyze this real marketing audit data and respond ONLY with valid JSON — no markdown, no explanation.
 
 CLIENT: {config.client_name}
 INDUSTRY: {config.client_industry}
-STATED TARGET MARKET: {config.stated_target_market}
+STATED TARGET MARKET: {config.stated_target_market or "Not provided"}
+BIGGEST CHALLENGE: {config.biggest_marketing_challenge or "Not provided"}
 STATED VALUE PROP: {config.stated_value_prop or "Not provided"}
 PRIMARY GOAL: {config.primary_goal}
 MONTHLY AD BUDGET: ${config.monthly_ad_budget:,.0f}
-TEAM SIZE: {config.team_size}
+TEAM SIZE: {_u(config.team_size, 1)}
 ACTIVE CHANNELS: {', '.join(channels) if channels else 'None'}
 EMAIL LIST: {config.email_list_size:,} contacts
 HAS NEWSLETTER: {config.has_active_newsletter}
-HAS REFERRAL SYSTEM: {config.has_referral_system}
-HAS LEAD MAGNET: {config.has_lead_magnet}
-BOOKING TOOL: {config.booking_tool or "None"}
-CURRENT CLIENTS: {config.current_client_count} ({config.current_client_types or "types unknown"})
+HAS REFERRAL SYSTEM: {_u(config.has_referral_system, False)}
+HAS LEAD MAGNET: {_u(config.has_lead_magnet, False)}
+BOOKING TOOL: {config.booking_tool if config.booking_tool else "None (unverified — not in intake form)"}
+CURRENT CLIENTS: {_u(config.current_client_count, 0)} ({config.current_client_types or "unverified — not in intake form"})
 TOP COMPETITORS: {', '.join(config.top_competitors) if config.top_competitors else "None listed"}
+
+COMPETITOR AUDIT FINDINGS:
+{self._format_competitor_data(competitor)}
 
 C.A.S.H. SCORES (computed from real audit data):
   C — Content:        {cash['C']}/100
