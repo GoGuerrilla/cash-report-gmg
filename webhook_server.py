@@ -769,33 +769,52 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
              ai.get("cash_s_score","—"), ai.get("cash_h_score","—"),
              overall_score, overall_grade)
 
-    # ── Generate PDF ──────────────────────────────────────────────
+    # ── Determine output format ───────────────────────────────────
+    beta_docx_only = os.environ.get("BETA_DOCX_ONLY", "").strip().lower() == "true"
+    if beta_docx_only:
+        log.info("BETA_DOCX_ONLY=true — skipping PDF generation, will email DOCX")
+
     os.makedirs("reports", exist_ok=True)
-    slug     = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
-    pdf_path = os.path.abspath(f"reports/{slug}_cash_report.pdf")
+    slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
 
-    _t = time.time()
-    try:
-        PDFReportGenerator(config, audit_data).generate(pdf_path)
-        if os.path.isfile(pdf_path):
-            log.info("TIMING  pdf_generation          %.2fs  (%d bytes)",
-                     time.time() - _t, os.path.getsize(pdf_path))
-            _archive_report(pdf_path, name)
-        else:
-            log.error("PDF generation ran but file not found at: %s", pdf_path)
-    except Exception as pdf_err:
-        log.error("PDF generation FAILED (%.2fs): %s\n%s",
-                  time.time() - _t, pdf_err, traceback.format_exc())
-        pdf_path = None
+    # ── Generate PDF (skipped when BETA_DOCX_ONLY=true) ──────────
+    pdf_path = None
+    if not beta_docx_only:
+        pdf_path = os.path.abspath(f"reports/{slug}_cash_report.pdf")
+        _t = time.time()
+        try:
+            PDFReportGenerator(config, audit_data).generate(pdf_path)
+            if os.path.isfile(pdf_path):
+                log.info("TIMING  pdf_generation          %.2fs  (%d bytes)",
+                         time.time() - _t, os.path.getsize(pdf_path))
+                _archive_report(pdf_path, name)
+            else:
+                log.error("PDF generation ran but file not found at: %s", pdf_path)
+                pdf_path = None
+        except Exception as pdf_err:
+            log.error("PDF generation FAILED (%.2fs): %s\n%s",
+                      time.time() - _t, pdf_err, traceback.format_exc())
+            pdf_path = None
 
-    # ── Generate DOCX backup ──────────────────────────────────────
+    # ── Generate DOCX ─────────────────────────────────────────────
+    # Primary output in BETA_DOCX_ONLY mode; backup otherwise.
     docx_path = os.path.abspath(f"reports/{slug}_cash_report.docx")
     _t = time.time()
     try:
         DocxReportGenerator(config, audit_data).generate(docx_path)
-        log.info("TIMING  docx_generation         %.2fs", time.time() - _t)
+        if os.path.isfile(docx_path):
+            log.info("TIMING  docx_generation         %.2fs  (%d bytes)",
+                     time.time() - _t, os.path.getsize(docx_path))
+        else:
+            log.warning("DOCX generation ran but file not found at: %s", docx_path)
+            docx_path = None
     except Exception as e:
-        log.warning("DOCX backup failed (%.2fs): %s", time.time() - _t, e)
+        log.warning("DOCX generation failed (%.2fs): %s", time.time() - _t, e)
+        docx_path = None
+
+    # ── Resolve which file gets emailed ───────────────────────────
+    report_attachment  = docx_path if beta_docx_only else pdf_path
+    attachment_label   = "DOCX"   if beta_docx_only else "PDF"
 
     # ── Email report ──────────────────────────────────────────────
     email_trigger_ts = datetime.utcnow().isoformat()
@@ -803,8 +822,9 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
     log.info("SENDGRID_API_KEY   : %s",
              f"set ({len(os.environ.get('SENDGRID_API_KEY',''))} chars)"
              if os.environ.get("SENDGRID_API_KEY") else "NOT SET")
-    log.info("PDF for attachment : %s  exists=%s",
-             pdf_path, os.path.isfile(pdf_path) if pdf_path else False)
+    log.info("Report attachment  : %s  format=%s  exists=%s",
+             report_attachment, attachment_label,
+             os.path.isfile(report_attachment) if report_attachment else False)
 
     # 1. Send to the client
     client_email_ok = False
@@ -812,19 +832,20 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
         _t = time.time()
         log.info("TIMING  sendgrid_trigger_start  → %s", contact_email)
         client_email_ok = send_report(
-            report_path   = pdf_path,
-            client_name   = name,
-            overall_score = overall_score,
-            overall_grade = overall_grade,
-            to_addr       = contact_email,
+            report_path      = report_attachment,
+            client_name      = name,
+            overall_score    = overall_score,
+            overall_grade    = overall_grade,
+            to_addr          = contact_email,
+            attachment_label = attachment_label,
         )
         log.info("TIMING  sendgrid_client_send    %.2fs  result=%s",
                  time.time() - _t, "SUCCESS" if client_email_ok else "FAILED")
         if not client_email_ok:
             log.error(
                 "CLIENT EMAIL FAILED — client %r (%s) did NOT receive their report. "
-                "PDF at: %s. Fix SENDGRID_API_KEY or REPORT_EMAIL_PASSWORD and resend manually.",
-                name, contact_email, pdf_path,
+                "%s at: %s. Fix SENDGRID_API_KEY or REPORT_EMAIL_PASSWORD and resend manually.",
+                name, contact_email, attachment_label, report_attachment,
             )
 
     # 2. Always send a copy to the GMG team inbox
@@ -832,11 +853,12 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
     if gmg_inbox and gmg_inbox != contact_email:
         _t = time.time()
         ok2 = send_report(
-            report_path   = pdf_path,
-            client_name   = name,
-            overall_score = overall_score,
-            overall_grade = overall_grade,
-            to_addr       = gmg_inbox,
+            report_path      = report_attachment,
+            client_name      = name,
+            overall_score    = overall_score,
+            overall_grade    = overall_grade,
+            to_addr          = gmg_inbox,
+            attachment_label = attachment_label,
         )
         log.info("TIMING  sendgrid_gmg_send       %.2fs  result=%s",
                  time.time() - _t, "SUCCESS" if ok2 else "FAILED")
@@ -858,7 +880,7 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
             website       = config.website_url,
             audit_data    = audit_data,
             ai_insights   = audit_data.get("ai_insights", {}),
-            report_path   = pdf_path,
+            report_path   = report_attachment,
         )
         log.info("TIMING  db_save                 %.2fs  row=#%s", time.time() - _t, row_id)
     except Exception as e:
@@ -1552,5 +1574,7 @@ if __name__ == "__main__":
     log.info("  Signature verification : %s", "ON" if wh_secret else "OFF (set TYPEFORM_WEBHOOK_SECRET)")
     log.info("  Email export key       : %s", "SET" if exp_secret else "NOT SET — /export-emails will return 503")
     log.info("  Admin password         : %s", "SET" if admin_pwd else "NOT SET — /admin will return 503")
+    beta_mode  = os.environ.get("BETA_DOCX_ONLY", "").strip().lower() == "true"
+    log.info("  Output format          : %s", "DOCX only (BETA_DOCX_ONLY=true)" if beta_mode else "PDF (default)")
     log.info("  Database backend       : %s", f"Postgres ({db_url[:30]}...)" if db_url else "SQLite (cash_clients.db)")
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)

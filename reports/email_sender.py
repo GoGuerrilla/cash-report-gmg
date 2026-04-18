@@ -39,12 +39,20 @@ from typing import Optional
 log = logging.getLogger("webhook")
 
 
-def _body_text(client_name: str, overall_score, overall_grade) -> str:
+def _mime_type(path: str) -> str:
+    """Return the correct MIME type for a report attachment based on file extension."""
+    if path.lower().endswith(".docx"):
+        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    return "application/pdf"
+
+
+def _body_text(client_name: str, overall_score, overall_grade,
+               attachment_label: str = "PDF") -> str:
     return (
         f"Hi,\n\n"
         f"Your C.A.S.H. Report for {client_name} is ready.\n\n"
         f"Overall C.A.S.H. Score: {overall_score}/100 ({overall_grade})\n\n"
-        f"The full report is attached as a PDF.\n\n"
+        f"The full report is attached as a {attachment_label}.\n\n"
         f"C.A.S.H. stands for:\n"
         f"C — Content\n"
         f"A — Audience\n"
@@ -91,7 +99,7 @@ def _send_sendgrid(
                 attachments.append({
                     "content":     encoded,
                     "filename":    os.path.basename(path),
-                    "type":        "application/pdf",
+                    "type":        _mime_type(path),
                     "disposition": "attachment",
                 })
             else:
@@ -197,9 +205,10 @@ def send_report(
     from_addr: Optional[str] = None,
     password: Optional[str] = None,
     teaser_path: Optional[str] = None,
+    attachment_label: Optional[str] = None,
 ) -> bool:
     """
-    Email the full report PDF to the recipient.
+    Email the full report to the recipient (PDF or DOCX depending on report_path).
     Uses SendGrid if SENDGRID_API_KEY is set, otherwise falls back to Gmail SMTP.
     Returns True on success, False on any failure. Never raises.
     """
@@ -214,13 +223,17 @@ def send_report(
     smtp_host = os.environ.get("REPORT_EMAIL_SMTP", "smtp.gmail.com").strip()
     smtp_port = int(os.environ.get("REPORT_EMAIL_PORT", 587))
 
+    # Auto-detect label from extension if not provided
+    if not attachment_label:
+        attachment_label = "DOCX" if (report_path or "").lower().endswith(".docx") else "PDF"
+
     # ── Diagnostic env var dump ────────────────────────────────────
     log.info("Email config: to=%r  from=%r  sg_key=%s  smtp_pw=%s",
              to_addr, from_addr,
              f"set ({len(sg_key)} chars)" if sg_key else "NOT SET",
              "set" if password else "NOT SET")
-    log.info("PDF path: %s  exists=%s  size=%s",
-             report_path,
+    log.info("Report attachment: %s  format=%s  exists=%s  size=%s",
+             report_path, attachment_label,
              os.path.isfile(report_path) if report_path else False,
              f"{os.path.getsize(report_path)} bytes"
              if report_path and os.path.isfile(report_path) else "N/A")
@@ -235,13 +248,13 @@ def send_report(
                   "Set SENDGRID_FROM_EMAIL (or REPORT_EMAIL_FROM) env var on Railway.")
         return False
 
-    # ── Guard: PDF missing ────────────────────────────────────────
+    # ── Guard: report file missing ────────────────────────────────
     if report_path and not os.path.isfile(report_path):
-        log.error("Email skipped — PDF not found at: %s", report_path)
+        log.error("Email skipped — report file not found at: %s", report_path)
         return False
 
     subject = f"Your C.A.S.H. Report is Ready — {client_name}"
-    body    = _body_text(client_name, overall_score, overall_grade)
+    body    = _body_text(client_name, overall_score, overall_grade, attachment_label)
 
     # ── Send ──────────────────────────────────────────────────────
     if sg_key:
