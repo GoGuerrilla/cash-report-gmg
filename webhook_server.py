@@ -128,9 +128,10 @@ logging.basicConfig(
 log = logging.getLogger("webhook")
 
 # ── Flask ─────────────────────────────────────────────────────────
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, session, redirect
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "cash-admin-change-me-in-prod")
 
 # ── CASH imports ──────────────────────────────────────────────────
 from config import ClientConfig
@@ -153,7 +154,7 @@ from analyzers.ai_analyzer import AIAnalyzer
 from reports.pdf_generator import PDFReportGenerator
 from reports.docx_generator import DocxReportGenerator
 from reports.email_sender import send_report
-from intake.client_db import save_audit_result, get_opted_in_emails
+from intake.client_db import save_audit_result, get_opted_in_emails, list_clients
 from intake.rate_limiter import RateLimiter, get_public_ip
 from run_goguerrilla import _build_base_channel_data, _merge_website_data
 
@@ -1199,6 +1200,301 @@ def export_emails():
 
 
 # ══════════════════════════════════════════════════════════════════
+#  ADMIN PORTAL
+# ══════════════════════════════════════════════════════════════════
+
+_LOGIN_PAGE = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CASH Admin — Login</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+     background:#0f172a;color:#e2e8f0;min-height:100vh;
+     display:flex;align-items:center;justify-content:center}
+.card{background:#1e293b;border:1px solid #334155;border-radius:12px;
+      padding:40px;width:100%;max-width:380px}
+h1{font-size:1.3rem;font-weight:700;margin-bottom:6px;color:#f8fafc}
+p{font-size:.85rem;color:#94a3b8;margin-bottom:28px}
+label{display:block;font-size:.75rem;font-weight:600;color:#94a3b8;
+      text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+input[type=password]{width:100%;padding:10px 14px;background:#0f172a;
+                     border:1px solid #475569;border-radius:8px;color:#f1f5f9;
+                     font-size:1rem;outline:none}
+input[type=password]:focus{border-color:#6366f1}
+button{width:100%;margin-top:20px;padding:11px;background:#6366f1;
+       border:none;border-radius:8px;color:#fff;font-size:1rem;
+       font-weight:600;cursor:pointer}
+button:hover{background:#4f46e5}
+.err{color:#f87171;font-size:.85rem;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>C.A.S.H. Admin</h1>
+  <p>Enter the admin password to access the dashboard.</p>
+  <form method="POST" action="/admin/login">
+    <label for="pw">Password</label>
+    <input type="password" id="pw" name="password" autofocus required>
+    __ERROR__
+    <button type="submit">Sign In</button>
+  </form>
+</div>
+</body>
+</html>"""
+
+
+_DASHBOARD_PAGE = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CASH Admin Portal</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+     background:#0f172a;color:#e2e8f0}
+header{background:#1e293b;border-bottom:1px solid #334155;
+       padding:16px 32px;display:flex;align-items:center;justify-content:space-between}
+header h1{font-size:1.1rem;font-weight:700;color:#f8fafc}
+header a{font-size:.8rem;color:#94a3b8;text-decoration:none}
+header a:hover{color:#f1f5f9}
+main{padding:32px;max-width:1500px;margin:0 auto}
+.section-title{font-size:.75rem;font-weight:600;color:#94a3b8;
+               text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px}
+.card{background:#1e293b;border:1px solid #334155;border-radius:12px;
+      padding:24px;margin-bottom:28px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:28px}
+.stat{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px}
+.stat .val{font-size:2rem;font-weight:700;color:#f8fafc}
+.stat .lbl{font-size:.8rem;color:#94a3b8;margin-top:4px}
+.trigger-form{display:grid;grid-template-columns:1fr 1fr 1fr auto;
+              gap:12px;align-items:end}
+label{display:block;font-size:.75rem;font-weight:600;color:#94a3b8;
+      text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px}
+input[type=text],input[type=email],input[type=url]{
+  width:100%;padding:9px 12px;background:#0f172a;
+  border:1px solid #475569;border-radius:7px;color:#f1f5f9;font-size:.9rem}
+input:focus{outline:none;border-color:#6366f1}
+.btn{padding:10px 20px;background:#6366f1;border:none;border-radius:7px;
+     color:#fff;font-size:.9rem;font-weight:600;cursor:pointer;
+     white-space:nowrap;height:38px}
+.btn:hover{background:#4f46e5}
+table{width:100%;border-collapse:collapse;font-size:.875rem}
+th{text-align:left;padding:10px 12px;font-size:.72rem;font-weight:600;
+   color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;
+   border-bottom:1px solid #334155}
+td{padding:11px 12px;border-bottom:1px solid #1e293b33;
+   color:#cbd5e1;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#ffffff08}
+.ok{color:#4ade80;font-weight:600}
+.pending{color:#fbbf24;font-weight:600}
+.sent{color:#4ade80}
+.nosent{color:#475569}
+.flash{padding:12px 16px;border-radius:8px;margin-bottom:20px;font-size:.875rem}
+.flash-ok{background:#14532d;color:#4ade80;border:1px solid #16a34a}
+.flash-err{background:#450a0a;color:#f87171;border:1px solid #b91c1c}
+a.ul{color:#818cf8;text-decoration:none;font-size:.82rem}
+a.ul:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<header>
+  <h1>C.A.S.H. Admin Portal</h1>
+  <a href="/admin/logout">Sign out</a>
+</header>
+<main>
+  __FLASH__
+  <div class="stats">
+    <div class="stat"><div class="val">__TOTAL__</div><div class="lbl">Total Audits</div></div>
+    <div class="stat"><div class="val">__COMPLETE__</div><div class="lbl">Completed</div></div>
+    <div class="stat"><div class="val">__EMAILS__</div><div class="lbl">Emails Sent</div></div>
+  </div>
+  <div class="card">
+    <div class="section-title">Trigger New Audit</div>
+    <form method="POST" action="/admin/trigger" class="trigger-form">
+      <div>
+        <label>Business Name</label>
+        <input type="text" name="business_name" placeholder="Acme Corp" required>
+      </div>
+      <div>
+        <label>Website URL</label>
+        <input type="url" name="website_url" placeholder="https://example.com" required>
+      </div>
+      <div>
+        <label>Contact Email</label>
+        <input type="email" name="contact_email" placeholder="client@example.com" required>
+      </div>
+      <div>
+        <button type="submit" class="btn">&#9654; Run Audit</button>
+      </div>
+    </form>
+  </div>
+  <div class="card">
+    <div class="section-title">All Audits (__TOTAL__)</div>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th><th>Client</th><th>Email</th><th>Website</th>
+          <th>Score</th><th>Grade</th><th>Date</th>
+          <th>Status</th><th>Email Sent</th>
+        </tr>
+      </thead>
+      <tbody>__ROWS__</tbody>
+    </table>
+  </div>
+</main>
+</body>
+</html>"""
+
+
+def _build_admin_html(rows: list, flash: str = "", flash_type: str = "ok") -> str:
+    total    = len(rows)
+    complete = sum(1 for r in rows if r.get("audit_grade"))
+    sent     = sum(1 for r in rows if r.get("email") and r.get("audit_grade"))
+
+    flash_html = ""
+    if flash:
+        cls = "flash-ok" if flash_type == "ok" else "flash-err"
+        flash_html = f'<div class="flash {cls}">{flash}</div>'
+
+    table_html = ""
+    for r in rows:
+        status    = "Complete" if r.get("audit_grade") else "Pending"
+        stat_cls  = "ok" if status == "Complete" else "pending"
+        is_sent   = bool(r.get("email") and r.get("audit_grade"))
+        sent_html = "&#10003; Sent" if is_sent else "&#8212;"
+        sent_cls  = "sent" if is_sent else "nosent"
+        score     = r.get("audit_score") or "&#8212;"
+        grade     = r.get("audit_grade") or "&#8212;"
+        website   = r.get("website") or ""
+        site_disp = (website[:38] + "…") if len(website) > 38 else website
+        site_html = (f'<a class="ul" href="{website}" target="_blank">{site_disp}</a>'
+                     if website else "&#8212;")
+        date_val  = (r.get("audit_date") or r.get("created_at") or "")[:10] or "&#8212;"
+        table_html += (
+            f"<tr>"
+            f"<td>{r.get('id', '&#8212;')}</td>"
+            f"<td>{r.get('client_name', '&#8212;')}</td>"
+            f"<td>{r.get('email') or '&#8212;'}</td>"
+            f"<td>{site_html}</td>"
+            f"<td style='text-align:center'>{score}</td>"
+            f"<td style='text-align:center;font-weight:700'>{grade}</td>"
+            f"<td>{date_val}</td>"
+            f"<td class='{stat_cls}'>{status}</td>"
+            f"<td class='{sent_cls}'>{sent_html}</td>"
+            f"</tr>"
+        )
+    if not table_html:
+        table_html = (
+            '<tr><td colspan="9" style="text-align:center;color:#64748b;'
+            'padding:32px">No audits yet.</td></tr>'
+        )
+
+    return (
+        _DASHBOARD_PAGE
+        .replace("__FLASH__",    flash_html)
+        .replace("__TOTAL__",    str(total))
+        .replace("__COMPLETE__", str(complete))
+        .replace("__EMAILS__",   str(sent))
+        .replace("__ROWS__",     table_html)
+    )
+
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    pwd = os.environ.get("ADMIN_PASSWORD", "").strip()
+    if not pwd:
+        return jsonify({"error": "Admin portal not configured — set ADMIN_PASSWORD env var"}), 503
+    error_html = ""
+    if request.method == "POST":
+        submitted = request.form.get("password", "")
+        if hmac.compare_digest(submitted.encode(), pwd.encode()):
+            session["admin_logged_in"] = True
+            return redirect("/admin")
+        error_html = '<p class="err">Incorrect password.</p>'
+    return _LOGIN_PAGE.replace("__ERROR__", error_html), 200
+
+
+@app.route("/admin/logout")
+def admin_logout():
+    session.pop("admin_logged_in", None)
+    return redirect("/admin/login")
+
+
+@app.route("/admin")
+def admin_portal():
+    if not session.get("admin_logged_in"):
+        return redirect("/admin/login")
+    try:
+        rows = list_clients(limit=200)
+    except Exception as exc:
+        log.error("Admin portal DB error: %s", exc)
+        rows = []
+    flash      = request.args.get("flash", "")
+    flash_type = request.args.get("ft", "ok")
+    return _build_admin_html(rows, flash, flash_type), 200
+
+
+@app.route("/admin/trigger", methods=["POST"])
+def admin_trigger():
+    if not session.get("admin_logged_in"):
+        return redirect("/admin/login")
+
+    from urllib.parse import urlencode
+
+    business_name = request.form.get("business_name", "").strip()
+    website_url   = request.form.get("website_url", "").strip()
+    contact_email = request.form.get("contact_email", "").strip()
+
+    if not website_url or not contact_email:
+        msg = "Website URL and contact email are required."
+        return redirect("/admin?" + urlencode({"flash": msg, "ft": "err"}))
+
+    parsed = {
+        "business_name":     business_name or "Manual Audit",
+        "website_url":       website_url,
+        "contact_email":     contact_email,
+        "target_market":     "",
+        "monthly_ad_budget": "0",
+        "email_list_size":   "0",
+        "email_frequency":   "",
+        "competitor_urls":   "",
+        "biggest_challenge": "",
+        "phone":             "",
+        "marketing_consent": "no",
+    }
+
+    try:
+        config = build_config_from_parsed(parsed)
+    except Exception as exc:
+        log.error("Admin trigger config build failed: %s", exc)
+        msg = f"Config build failed: {str(exc)[:80]}"
+        return redirect("/admin?" + urlencode({"flash": msg, "ft": "err"}))
+
+    rl    = RateLimiter(bypass=True)
+    token = f"admin-{contact_email}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    t = threading.Thread(
+        target = _audit_thread,
+        args   = (config, rl, contact_email, website_url, None, token),
+        daemon = True,
+        name   = f"admin-audit-{contact_email[:12]}",
+    )
+    t.start()
+    log.info("Admin-triggered audit launched — client=%r  email=%s  url=%s",
+             config.client_name, contact_email, website_url)
+
+    label = business_name or website_url
+    msg   = f"Audit started for {label} — report will be emailed when complete."
+    return redirect("/admin?" + urlencode({"flash": msg, "ft": "ok"}))
+
+
+# ══════════════════════════════════════════════════════════════════
 #  REJECTION EMAIL HELPER
 # ══════════════════════════════════════════════════════════════════
 
@@ -1248,10 +1544,13 @@ if __name__ == "__main__":
     log.info("  POST /webhook       — Typeform webhook target")
     log.info("  GET  /health        — health check")
     log.info("  GET  /export-emails — opted-in email CSV (key-protected)")
+    log.info("  GET  /admin         — admin portal (password-protected)")
     wh_secret  = os.environ.get("TYPEFORM_WEBHOOK_SECRET", "")
-    exp_secret = os.environ.get("EXPORT_SECRET_KEY", "")
+    exp_secret  = os.environ.get("EXPORT_SECRET_KEY", "")
+    admin_pwd   = os.environ.get("ADMIN_PASSWORD", "")
     db_url     = os.environ.get("DATABASE_URL", "")
     log.info("  Signature verification : %s", "ON" if wh_secret else "OFF (set TYPEFORM_WEBHOOK_SECRET)")
     log.info("  Email export key       : %s", "SET" if exp_secret else "NOT SET — /export-emails will return 503")
+    log.info("  Admin password         : %s", "SET" if admin_pwd else "NOT SET — /admin will return 503")
     log.info("  Database backend       : %s", f"Postgres ({db_url[:30]}...)" if db_url else "SQLite (cash_clients.db)")
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
