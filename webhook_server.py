@@ -309,8 +309,13 @@ def _parse_competitor_urls(raw: str) -> list:
     urls  = []
     for p in parts:
         p = _normalise_url(p)
-        if p:
-            urls.append(p)
+        if not p:
+            continue
+        raw_domain = re.sub(r"https?://", "", p).split("/")[0]
+        if " " in raw_domain or "." not in raw_domain:
+            log.warning("Competitor URL rejected (not a valid domain): %r", p)
+            continue
+        urls.append(p)
     return urls[:3]
 
 
