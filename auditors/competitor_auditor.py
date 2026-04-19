@@ -60,9 +60,15 @@ def _domain(url: str) -> str:
 
 
 def _ensure_https(url: str) -> str:
-    if not url.startswith("http"):
-        return "https://" + url
-    return url
+    """Normalise a URL: strip whitespace, enforce https://, strip trailing slash."""
+    url = url.strip()
+    if not url:
+        return url
+    if url.lower().startswith("http://"):
+        url = "https://" + url[7:]
+    elif not url.lower().startswith("https://"):
+        url = "https://" + url
+    return url.rstrip("/")
 
 
 class CompetitorAuditor:

@@ -292,11 +292,15 @@ def parse_typeform_payload(payload: dict) -> dict:
 # ══════════════════════════════════════════════════════════════════
 
 def _normalise_url(url: str) -> str:
-    """Ensure URL has https:// prefix."""
+    """Normalise a URL: strip whitespace, enforce https://, strip trailing slash."""
     url = url.strip()
-    if url and not re.match(r"https?://", url, re.I):
+    if not url:
+        return url
+    if url.lower().startswith("http://"):
+        url = "https://" + url[7:]
+    elif not url.lower().startswith("https://"):
         url = "https://" + url
-    return url
+    return url.rstrip("/")
 
 
 def _parse_competitor_urls(raw: str) -> list:
@@ -304,12 +308,9 @@ def _parse_competitor_urls(raw: str) -> list:
     parts = re.split(r"[,;\n]+", raw)
     urls  = []
     for p in parts:
-        p = p.strip()
-        if not p:
-            continue
-        if not re.match(r"https?://", p, re.I):
-            p = "https://" + p
-        urls.append(p)
+        p = _normalise_url(p)
+        if p:
+            urls.append(p)
     return urls[:3]
 
 
@@ -1475,7 +1476,7 @@ def admin_trigger():
     from urllib.parse import urlencode
 
     business_name = request.form.get("business_name", "").strip()
-    website_url   = request.form.get("website_url", "").strip()
+    website_url   = _normalise_url(request.form.get("website_url", ""))
     contact_email = request.form.get("contact_email", "").strip()
 
     if not website_url or not contact_email:
