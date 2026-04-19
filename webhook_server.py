@@ -445,26 +445,11 @@ def _archive_report(pdf_path: str, client_name: str) -> str | None:
       ~/Desktop/CASH GMG Audit/Client Reports/YYYY/MonthName/
     Returns the archive path on success, None on failure.
     """
-    import shutil
+    # Files are now saved directly to the monthly folder by _run_client_audit().
     if not pdf_path or not os.path.isfile(pdf_path):
         return None
-    try:
-        today      = datetime.utcnow()
-        year       = today.strftime("%Y")
-        month      = today.strftime("%B")          # e.g. "April"
-        safe_name  = re.sub(r"[^a-zA-Z0-9]+", "_", client_name).strip("_")
-        filename   = f"{safe_name}_CASH_Report_{today.strftime('%Y-%m-%d')}.pdf"
-        archive_dir = os.path.expanduser(
-            f"~/Desktop/CASH GMG Audit/Client Reports/{year}/{month}"
-        )
-        os.makedirs(archive_dir, exist_ok=True)
-        dest = os.path.join(archive_dir, filename)
-        shutil.copy2(pdf_path, dest)
-        log.info("Report archived → %s", dest)
-        return dest
-    except Exception as exc:
-        log.warning("Archive copy failed (non-fatal): %s", exc)
-        return None
+    log.info("Report saved → %s", pdf_path)
+    return pdf_path
 
 
 def _safe_audit(label: str, fn, default: dict) -> dict:
@@ -780,20 +765,25 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
     if beta_docx_only:
         log.info("BETA_DOCX_ONLY=true — skipping PDF generation, will email DOCX")
 
-    os.makedirs("reports", exist_ok=True)
-    slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+    _reports_base = os.environ.get("REPORTS_DIR", "reports").rstrip("/")
+    _today        = datetime.utcnow()
+    _month_folder = f"Client Reports {_today.strftime('%Y %B')}"
+    _report_dir   = os.path.join(_reports_base, _month_folder)
+    os.makedirs(_report_dir, exist_ok=True)
+
+    slug      = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+    _basename = f"{slug}_{_today.strftime('%Y-%m-%d_%H%M%S')}"
 
     # ── Generate PDF (skipped when BETA_DOCX_ONLY=true) ──────────
     pdf_path = None
     if not beta_docx_only:
-        pdf_path = os.path.abspath(f"reports/{slug}_cash_report.pdf")
+        pdf_path = os.path.abspath(os.path.join(_report_dir, f"{_basename}.pdf"))
         _t = time.time()
         try:
             PDFReportGenerator(config, audit_data).generate(pdf_path)
             if os.path.isfile(pdf_path):
                 log.info("TIMING  pdf_generation          %.2fs  (%d bytes)",
                          time.time() - _t, os.path.getsize(pdf_path))
-                _archive_report(pdf_path, name)
             else:
                 log.error("PDF generation ran but file not found at: %s", pdf_path)
                 pdf_path = None
@@ -804,7 +794,7 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
 
     # ── Generate DOCX ─────────────────────────────────────────────
     # Primary output in BETA_DOCX_ONLY mode; backup otherwise.
-    docx_path = os.path.abspath(f"reports/{slug}_cash_report.docx")
+    docx_path = os.path.abspath(os.path.join(_report_dir, f"{_basename}.docx"))
     _t = time.time()
     try:
         DocxReportGenerator(config, audit_data).generate(docx_path)
@@ -897,6 +887,50 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
         rl.log(email=contact_email, website_url=website_url, ip_address=ip_address)
     except Exception:
         pass
+
+    # ── Admin notification email ──────────────────────────────────
+    try:
+        admin_notify = os.environ.get("ADMIN_NOTIFY_EMAIL", "gmg@goguerrilla.xyz").strip()
+        from_addr    = (os.environ.get("SENDGRID_FROM_EMAIL")
+                        or os.environ.get("REPORT_EMAIL_FROM", "")).strip()
+        sg_key       = os.environ.get("SENDGRID_API_KEY", "").strip()
+        if admin_notify and sg_key and from_addr:
+            _elapsed  = round(time.time() - audit_wall_start, 1)
+            pdf_info  = (f"{pdf_path} ({os.path.getsize(pdf_path):,} bytes)"
+                         if pdf_path and os.path.isfile(pdf_path) else "not generated")
+            docx_info = (f"{docx_path} ({os.path.getsize(docx_path):,} bytes)"
+                         if docx_path and os.path.isfile(docx_path) else "not generated")
+            body = (
+                f"C.A.S.H. Audit Complete\n"
+                f"{'─' * 40}\n"
+                f"Business : {name}\n"
+                f"Website  : {config.website_url or config.linktree_url or '—'}\n"
+                f"Client   : {contact_email or '—'}\n"
+                f"Source   : {getattr(config, 'audit_source', '—')}\n"
+                f"\n"
+                f"Score    : {overall_score}/100  Grade: {overall_grade}\n"
+                f"Time     : {_elapsed}s\n"
+                f"\n"
+                f"PDF      : {pdf_info}\n"
+                f"DOCX     : {docx_info}\n"
+            )
+            requests.post(
+                "https://api.sendgrid.com/v3/mail/send",
+                headers={
+                    "Authorization": f"Bearer {sg_key}",
+                    "Content-Type":  "application/json",
+                },
+                json={
+                    "personalizations": [{"to": [{"email": admin_notify}]}],
+                    "from":    {"email": from_addr},
+                    "subject": f"New C.A.S.H. Report Generated — {name}",
+                    "content": [{"type": "text/plain", "value": body}],
+                },
+                timeout=10,
+            )
+            log.info("Admin notification sent → %s", admin_notify)
+    except Exception as e:
+        log.warning("Admin notification failed (non-critical): %s", e)
 
     total_elapsed = round(time.time() - audit_wall_start, 1)
     log.info("=== AUDIT COMPLETE: %s  wall_time=%.1fs  [%s] ===",
