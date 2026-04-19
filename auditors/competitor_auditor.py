@@ -105,15 +105,25 @@ class CompetitorAuditor:
 
         competitors = []
         for i, url in enumerate(self.competitor_urls, 1):
-            print(f"  Auditing competitor {i}: {_domain(url)} …")
+            log.info("Competitor %d/%d: auditing %s …", i, len(self.competitor_urls), _domain(url))
             comp = self._audit_competitor(url)
             competitors.append(comp)
-            status_note = comp.get("note", "")
-            print(
-                f"    SEO={comp['seo_score']}  Perf={comp['performance_score']}  "
-                f"Tech={comp['technical_score']}  "
-                f"Social={comp['social_channel_count']} channels"
-                + (f"  [{status_note}]" if status_note else "")
+            seo_signals = [
+                k for k in ("has_title", "has_meta_desc", "has_h1", "has_og_tags",
+                             "has_schema", "has_canonical", "has_robots_txt", "has_sitemap")
+                if comp.get(k) is True
+            ]
+            log.info(
+                "Competitor %d %s — reachable=%s  tech=%s  content=%s  conversion=%s  "
+                "social=%s  seo_signals=[%s]%s",
+                i, _domain(url),
+                comp["reachable"],
+                comp["technical_score"],
+                comp["content_score"],
+                comp["conversion_score"],
+                comp["social_channel_count"],
+                ", ".join(seo_signals) if seo_signals else "none",
+                f"  NOTE: {comp['note']}" if comp.get("note") else "",
             )
 
         comparison = self._build_comparison(competitors)
@@ -266,8 +276,9 @@ class CompetitorAuditor:
             r = requests.get(url, headers=_HEADERS, timeout=15, allow_redirects=True)
             if r.status_code < 400:
                 return BeautifulSoup(r.text, "html.parser")
-        except Exception:
-            pass
+            log.warning("Homepage scrape non-2xx/3xx for %s: HTTP %s", url, r.status_code)
+        except Exception as e:
+            log.warning("Homepage scrape failed for %s: %s", url, e)
         return None
 
     def _score_technical(self, url: str, soup) -> int:
