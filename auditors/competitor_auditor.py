@@ -128,13 +128,24 @@ class CompetitorAuditor:
             "url":                  url,
             "domain":               domain,
             "reachable":            False,
-            "seo_score":            50,
-            "performance_score":    50,
-            "technical_score":      50,
-            "content_score":        50,
-            "conversion_score":     50,
+            "data_unavailable":     False,
+            "seo_score":            None,
+            "performance_score":    None,
+            "technical_score":      None,
+            "content_score":        None,
+            "conversion_score":     None,
             "social_channels":      [],
             "social_channel_count": 0,
+            # SEO signal defaults — populated by _extract_seo_signals()
+            "has_title":            None,
+            "title_text":           "",
+            "has_meta_desc":        None,
+            "has_h1":               None,
+            "has_og_tags":          None,
+            "has_schema":           None,
+            "has_canonical":        None,
+            "has_robots_txt":       None,
+            "has_sitemap":          None,
             "note":                 "",
         }
 
@@ -145,23 +156,25 @@ class CompetitorAuditor:
             cats = lh.get("categories", {})
             seo_raw  = cats.get("seo",         {}).get("score")
             perf_raw = cats.get("performance", {}).get("score")
-            base["seo_score"]         = round(seo_raw  * 100) if seo_raw  is not None else 50
-            base["performance_score"] = round(perf_raw * 100) if perf_raw is not None else 50
+            base["seo_score"]         = round(seo_raw  * 100) if seo_raw  is not None else None
+            base["performance_score"] = round(perf_raw * 100) if perf_raw is not None else None
             base["reachable"] = True
         else:
-            base["note"] = "PageSpeed unavailable — scores neutral"
+            base["note"] = "PageSpeed unavailable — scores unavailable"
 
-        # ── Homepage scrape → Technical + Content + Conversion + Social ──
+        # ── Homepage scrape → Technical + Content + Conversion + Social + SEO signals ──
         homepage = self._scrape_homepage(url)
         if homepage:
-            base["reachable"]       = True
-            base["technical_score"] = self._score_technical(url, homepage)
-            base["content_score"]   = self._score_content(homepage)
-            base["conversion_score"]= self._score_conversion(homepage)
-            base["social_channels"] = self._detect_social(homepage)
+            base["reachable"]        = True
+            base["technical_score"]  = self._score_technical(url, homepage)
+            base["content_score"]    = self._score_content(homepage)
+            base["conversion_score"] = self._score_conversion(homepage)
+            base["social_channels"]  = self._detect_social(homepage)
             base["social_channel_count"] = len(base["social_channels"])
+            base.update(self._extract_seo_signals(homepage, url))
         elif not psi:
-            base["note"] = "Competitor site unreachable — all scores neutral"
+            base["note"]             = "Competitor site unreachable — all scores unavailable"
+            base["data_unavailable"] = True
 
         return base
 
@@ -186,6 +199,59 @@ class CompetitorAuditor:
             if attempt == 0:
                 time.sleep(2)
         return {}
+
+    def _extract_seo_signals(self, soup, url: str) -> Dict[str, Any]:
+        """Scrape SEO signals from an already-fetched BeautifulSoup object."""
+        signals: Dict[str, Any] = {}
+
+        # Page title
+        title_tag = soup.find("title")
+        signals["has_title"]  = bool(title_tag and title_tag.get_text(strip=True))
+        signals["title_text"] = title_tag.get_text(strip=True) if title_tag else ""
+
+        # Meta description
+        meta_desc = soup.find("meta", attrs={"name": lambda v: v and v.lower() == "description"})
+        signals["has_meta_desc"] = bool(
+            meta_desc and meta_desc.get("content", "").strip()
+        )
+
+        # H1
+        h1 = soup.find("h1")
+        signals["has_h1"] = bool(h1 and h1.get_text(strip=True))
+
+        # Open Graph tags
+        og = soup.find("meta", property=lambda v: v and v.startswith("og:"))
+        signals["has_og_tags"] = bool(og)
+
+        # Structured data / schema
+        schema = soup.find("script", attrs={"type": "application/ld+json"})
+        signals["has_schema"] = bool(schema and schema.get_text(strip=True))
+
+        # Canonical tag
+        canonical = soup.find("link", attrs={"rel": lambda v: v and "canonical" in v})
+        signals["has_canonical"] = bool(canonical and canonical.get("href", "").strip())
+
+        # robots.txt — separate lightweight request
+        try:
+            parsed     = urlparse(url)
+            robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+            r = requests.get(robots_url, headers=_HEADERS, timeout=8, allow_redirects=True)
+            signals["has_robots_txt"] = (
+                r.status_code == 200 and "user-agent" in r.text.lower()
+            )
+        except Exception:
+            signals["has_robots_txt"] = None
+
+        # Sitemap — separate lightweight request
+        try:
+            parsed      = urlparse(url)
+            sitemap_url = f"{parsed.scheme}://{parsed.netloc}/sitemap.xml"
+            r = requests.get(sitemap_url, headers=_HEADERS, timeout=8, allow_redirects=True)
+            signals["has_sitemap"] = r.status_code == 200 and bool(r.text.strip())
+        except Exception:
+            signals["has_sitemap"] = None
+
+        return signals
 
     def _scrape_homepage(self, url: str):
         if not REQUESTS_OK:
@@ -249,22 +315,44 @@ class CompetitorAuditor:
     # ── Client row builder ─────────────────────────────────────
 
     def _client_row(self) -> Dict[str, Any]:
-        seo_data  = self.client_data.get("seo", {})
+        seo_data   = self.client_data.get("seo", {})
         web_scores = self.client_data.get("website", {}).get("scores", {})
-        gbp_data  = self.client_data.get("gbp", {})
+        gbp_data   = self.client_data.get("gbp", {})
+        vs         = seo_data.get("crawl_signals", {}).get("validation_states", {})
+        robots     = seo_data.get("robots_txt", {})
+        sitemap    = seo_data.get("sitemap", {})
+
+        def _vs_bool(key):
+            state = vs.get(key)
+            if state in ("found", "found_rendered"):
+                return True
+            if state == "missing":
+                return False
+            return None  # "unable" or absent
+
         return {
             "label":                self.config.client_name,
             "url":                  self.config.website_url or self.config.linktree_url,
             "domain":               _domain(self.config.website_url or ""),
             "is_client":            True,
-            "seo_score":            seo_data.get("score", 50),
-            "performance_score":    seo_data.get("performance_score", 50),
-            "technical_score":      web_scores.get("technical", 50),
-            "content_score":        web_scores.get("content", 50),
-            "conversion_score":     web_scores.get("conversion", 50),
+            "seo_score":            seo_data.get("score"),
+            "performance_score":    seo_data.get("performance_score"),
+            "technical_score":      web_scores.get("technical"),
+            "content_score":        web_scores.get("content"),
+            "conversion_score":     web_scores.get("conversion"),
             "social_channels":      self.config.active_social_channels,
             "social_channel_count": len(self.config.active_social_channels),
-            "gbp_score":            gbp_data.get("score", 50),
+            "gbp_score":            gbp_data.get("score"),
+            # SEO signals
+            "has_title":            _vs_bool("title"),
+            "title_text":           seo_data.get("crawl_signals", {}).get("title", ""),
+            "has_meta_desc":        _vs_bool("meta"),
+            "has_h1":               _vs_bool("h1"),
+            "has_og_tags":          _vs_bool("og"),
+            "has_schema":           seo_data.get("has_schema"),
+            "has_canonical":        _vs_bool("canonical"),
+            "has_robots_txt":       robots.get("exists"),
+            "has_sitemap":          sitemap.get("found"),
         }
 
     # ── Comparison builder ─────────────────────────────────────
@@ -273,30 +361,44 @@ class CompetitorAuditor:
         client = self._client_row()
 
         metrics = [
-            ("seo_score",          "SEO Score"),
-            ("performance_score",  "Performance Score"),
-            ("technical_score",    "Website Technical"),
-            ("content_score",      "Website Content"),
-            ("conversion_score",   "Website Conversion"),
-            ("social_channel_count","Social Channels"),
+            ("seo_score",           "SEO Score",          "score"),
+            ("performance_score",   "Performance Score",  "score"),
+            ("technical_score",     "Website Technical",  "score"),
+            ("content_score",       "Website Content",    "score"),
+            ("conversion_score",    "Website Conversion", "score"),
+            ("social_channel_count","Social Channels",    "count"),
+            ("has_title",           "Page Title",         "bool"),
+            ("has_meta_desc",       "Meta Description",   "bool"),
+            ("has_h1",              "H1 Tag",             "bool"),
+            ("has_og_tags",         "Open Graph Tags",    "bool"),
+            ("has_schema",          "Structured Data",    "bool"),
+            ("has_canonical",       "Canonical Tag",      "bool"),
+            ("has_robots_txt",      "robots.txt",         "bool"),
+            ("has_sitemap",         "XML Sitemap",        "bool"),
         ]
 
         rows = []
-        for key, label in metrics:
-            client_val = client[key]
-            comp_vals  = [c[key] for c in competitors]
-            is_score   = key != "social_channel_count"
+        for key, label, kind in metrics:
+            client_val = client.get(key)
+            comp_vals  = [c.get(key) for c in competitors]
 
-            # Determine client standing relative to each competitor
-            if is_score:
-                beats = sum(1 for v in comp_vals if isinstance(v, (int, float)) and client_val > v)
-                ties  = sum(1 for v in comp_vals if isinstance(v, (int, float)) and client_val == v)
+            if kind in ("score", "count"):
+                numeric = [v for v in comp_vals if isinstance(v, (int, float))]
+                beats = sum(
+                    1 for v in numeric
+                    if client_val is not None and client_val > v
+                )
+                ties  = sum(
+                    1 for v in numeric
+                    if client_val is not None and client_val == v
+                ) if kind == "score" else 0
             else:
-                beats = sum(1 for v in comp_vals if isinstance(v, (int, float)) and client_val > v)
+                beats = 0
                 ties  = 0
 
             rows.append({
                 "metric":      label,
+                "kind":        kind,
                 "client_val":  client_val,
                 "comp_vals":   comp_vals,
                 "beats":       beats,
@@ -304,9 +406,9 @@ class CompetitorAuditor:
             })
 
         return {
-            "client":        client,
-            "competitors":   competitors,
-            "rows":          rows,
+            "client":      client,
+            "competitors": competitors,
+            "rows":        rows,
         }
 
     # ── Insight generator ──────────────────────────────────────
@@ -320,29 +422,31 @@ class CompetitorAuditor:
         if not comps:
             return insights
 
-        # SEO gap
         for row in rows:
+            if row.get("kind") not in ("score", "count"):
+                continue
             metric     = row["metric"]
             client_val = row["client_val"]
+            # Filter None before averaging — never crash on unavailable data
             comp_vals  = [v for v in row["comp_vals"] if isinstance(v, (int, float))]
-            if not comp_vals:
+            if not comp_vals or not isinstance(client_val, (int, float)):
                 continue
             avg_comp = round(sum(comp_vals) / len(comp_vals))
             gap      = avg_comp - client_val
-            if isinstance(client_val, int) and gap >= 10:
+            if gap >= 10:
                 insights.append(
                     f"🟡 {metric}: client scores {client_val} vs competitor average {avg_comp} "
                     f"(gap: {gap} points) — opportunity to close."
                 )
-            elif isinstance(client_val, int) and client_val - avg_comp >= 10:
+            elif client_val - avg_comp >= 10:
                 insights.append(
                     f"✅ {metric}: client leads competitors by {client_val - avg_comp} points "
                     f"(client {client_val} vs avg {avg_comp})."
                 )
 
         # Social presence
-        client_social = client.get("social_channel_count", 0)
-        comp_social   = [c.get("social_channel_count", 0) for c in comps]
+        client_social = client.get("social_channel_count") or 0
+        comp_social   = [c.get("social_channel_count") or 0 for c in comps]
         if comp_social:
             avg_social = sum(comp_social) / len(comp_social)
             if client_social > avg_social:

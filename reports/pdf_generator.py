@@ -1216,15 +1216,24 @@ class PDFReportGenerator:
 
         # Competitor table
         competitors = comp.get("competitors", [])
+        def _score_or_na(val):
+            return "N/A" if val is None else str(val)
+
+        def _bool_or_na(val):
+            if val is None: return "N/A"
+            return "Yes" if val else "No"
+
         comp_tbody = ""
         for i, c in enumerate(competitors, 1):
             domain = _h(c.get("domain", c.get("url", f"Competitor {i}")))
+            note   = c.get("note", "")
+            note_td = f' <span style="color:#888;font-size:9px">({_h(note)})</span>' if note else ""
             comp_tbody += (f'<tr>'
                            f'<td>{i}</td>'
-                           f'<td class="td-name">{domain}</td>'
-                           f'<td>{c.get("seo_score", "—")}</td>'
-                           f'<td>{c.get("performance_score", "—")}</td>'
-                           f'<td>{c.get("technical_score", "—")}</td>'
+                           f'<td class="td-name">{domain}{note_td}</td>'
+                           f'<td>{_score_or_na(c.get("seo_score"))}</td>'
+                           f'<td>{_score_or_na(c.get("performance_score"))}</td>'
+                           f'<td>{_score_or_na(c.get("technical_score"))}</td>'
                            f'<td>{c.get("social_channel_count", 0)}</td>'
                            f'</tr>')
 
@@ -1240,19 +1249,40 @@ class PDFReportGenerator:
         client_data = comparison.get("client", {})
         comp_side_tbody = ""
         metrics = [
-            ("SEO Score",          "seo_score"),
-            ("Performance Score",  "performance_score"),
-            ("Website Technical",  "technical_score"),
-            ("Website Conversion", "conversion_score"),
-            ("Social Channels",    "social_channel_count"),
+            ("SEO Score",          "seo_score",            "score"),
+            ("Performance Score",  "performance_score",    "score"),
+            ("Website Technical",  "technical_score",      "score"),
+            ("Website Conversion", "conversion_score",     "score"),
+            ("Social Channels",    "social_channel_count", "count"),
+            ("Page Title",         "has_title",            "bool"),
+            ("Meta Description",   "has_meta_desc",        "bool"),
+            ("H1 Tag",             "has_h1",               "bool"),
+            ("Open Graph Tags",    "has_og_tags",          "bool"),
+            ("Structured Data",    "has_schema",           "bool"),
+            ("Canonical Tag",      "has_canonical",        "bool"),
+            ("robots.txt",         "has_robots_txt",       "bool"),
+            ("XML Sitemap",        "has_sitemap",          "bool"),
         ]
         comp_objs = comparison.get("competitors", [])
         if client_data and comp_objs:
-            for label, key in metrics:
-                client_val = client_data.get(key, "—")
-                vals = f'<td class="td-good">{client_val}</td>'
+            for label, key, kind in metrics:
+                raw_client = client_data.get(key)
+                if kind == "bool":
+                    client_disp = _bool_or_na(raw_client)
+                elif kind == "score":
+                    client_disp = _score_or_na(raw_client)
+                else:
+                    client_disp = str(raw_client) if raw_client is not None else "—"
+                vals = f'<td class="td-good">{client_disp}</td>'
                 for c in comp_objs[:3]:
-                    vals += f'<td>{c.get(key, "—")}</td>'
+                    raw = c.get(key)
+                    if kind == "bool":
+                        disp = _bool_or_na(raw)
+                    elif kind == "score":
+                        disp = _score_or_na(raw)
+                    else:
+                        disp = str(raw) if raw is not None else "—"
+                    vals += f'<td>{disp}</td>'
                 comp_side_tbody += f'<tr><td class="td-name">{_h(label)}</td>{vals}</tr>'
 
         comp_side_table = ""

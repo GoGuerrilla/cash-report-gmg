@@ -1056,15 +1056,38 @@ class DocxReportGenerator:
 
         # ── Data rows ──────────────────────────────────────────
         metrics_to_show = [
-            ("seo_score",           "SEO Score",           True),
-            ("performance_score",   "Performance",         True),
-            ("technical_score",     "Website Technical",   True),
-            ("content_score",       "Website Content",     True),
-            ("conversion_score",    "Website Conversion",  True),
-            ("social_channel_count","Social Channels",     False),
+            ("seo_score",           "SEO Score",           "score"),
+            ("performance_score",   "Performance",         "score"),
+            ("technical_score",     "Website Technical",   "score"),
+            ("content_score",       "Website Content",     "score"),
+            ("conversion_score",    "Website Conversion",  "score"),
+            ("social_channel_count","Social Channels",     "count"),
+            ("has_title",           "Page Title",          "bool"),
+            ("has_meta_desc",       "Meta Description",    "bool"),
+            ("has_h1",              "H1 Tag",              "bool"),
+            ("has_og_tags",         "Open Graph Tags",     "bool"),
+            ("has_schema",          "Structured Data",     "bool"),
+            ("has_canonical",       "Canonical Tag",       "bool"),
+            ("has_robots_txt",      "robots.txt",          "bool"),
+            ("has_sitemap",         "XML Sitemap",         "bool"),
         ]
 
-        for row_i, (key, label, is_score) in enumerate(metrics_to_show):
+        def _fmt_cell(val, kind):
+            """Return (display_string, color) for a comparison table cell."""
+            if kind == "score":
+                if val is None:
+                    return "Unavailable", MGRAY
+                return f"{val}/100", _score_color(val)
+            elif kind == "count":
+                if val is None:
+                    return "N/A", MGRAY
+                return str(val), (GREEN if val >= 3 else AMBER)
+            else:  # bool
+                if val is None:
+                    return "N/A", MGRAY
+                return ("✓ Yes", GREEN) if val else ("✗ No", AMBER)
+
+        for row_i, (key, label, kind) in enumerate(metrics_to_show):
             row = table.add_row()
             cells = row.cells
 
@@ -1078,30 +1101,18 @@ class DocxReportGenerator:
             _cell_para(cells[0], label, bold=False, color=DGRAY, size=9)
 
             # Client value cell
-            client_val = client.get(key, 50)
-            comp_vals  = [c.get(key, 50) for c in competitors]
+            client_val = client.get(key)
             cells[1].width = client_w
-
-            if is_score:
-                disp = f"{client_val}/100"
-                color = _score_color(client_val) if isinstance(client_val, int) else MGRAY
-            else:
-                disp  = str(client_val)
-                color = GREEN if isinstance(client_val, int) and client_val >= 3 else AMBER
+            disp, color = _fmt_cell(client_val, kind)
             _cell_para(cells[1], disp, bold=True, color=color, size=9,
                        align=WD_ALIGN_PARAGRAPH.CENTER)
 
             # Competitor value cells
             for ci, comp in enumerate(competitors):
-                cell  = cells[2 + ci]
+                cell = cells[2 + ci]
                 cell.width = comp_w
-                val   = comp.get(key, 50)
-                if is_score:
-                    disp  = f"{val}/100" if isinstance(val, int) else "—"
-                    color = _score_color(val) if isinstance(val, int) else MGRAY
-                else:
-                    disp  = str(val) if val else "—"
-                    color = GREEN if isinstance(val, int) and val >= 3 else AMBER
+                val = comp.get(key)
+                disp, color = _fmt_cell(val, kind)
                 _cell_para(cell, disp, bold=False, color=color, size=9,
                            align=WD_ALIGN_PARAGRAPH.CENTER)
 
