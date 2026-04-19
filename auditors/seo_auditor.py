@@ -651,6 +651,51 @@ class SEOAuditor:
         crawl_extra_issues    = [i for i in crawl["issues"]    if any(k in i.lower() for k in _crawl_kws)]
         crawl_extra_strengths = [s for s in crawl["strengths"] if any(k in s.lower() for k in _crawl_kws)]
 
+        # Render authority: when Playwright confirmed a signal, suppress contradicting
+        # PSI failures and crawl "client-side can't verify" notices for that signal.
+        _upgraded = (
+            crawl.get("render_comparison", {})
+                 .get("upgraded_signals", [])
+        )
+        if _upgraded:
+            _render_suppress = {
+                "title":    ("missing page title",       "title"),
+                "meta":     ("missing meta description", "meta"),
+                "h1":       ("",                         "h1"),
+                "canonical":("no canonical",             "canonical"),
+                "schema":   ("no structured data",       "schema"),
+                "og":       ("no open graph",            "og"),
+            }
+            suppress_psi_patterns   = []
+            suppress_crawl_patterns = []
+            confirmed_labels        = []
+            for sig in _upgraded:
+                if sig in _render_suppress:
+                    psi_pat, crawl_pat = _render_suppress[sig]
+                    if psi_pat:
+                        suppress_psi_patterns.append(psi_pat.lower())
+                    if crawl_pat:
+                        suppress_crawl_patterns.append(crawl_pat.lower())
+                    confirmed_labels.append(sig)
+
+            psi_issues = [
+                i for i in psi_issues
+                if not any(p in i.lower() for p in suppress_psi_patterns)
+            ]
+            crawl_extra_issues = [
+                i for i in crawl_extra_issues
+                if not any(p in i.lower() for p in suppress_crawl_patterns)
+            ]
+            crawl_extra_strengths = [
+                s for s in crawl_extra_strengths
+                if "client-side" not in s.lower()
+                or not any(p in s.lower() for p in suppress_crawl_patterns)
+            ]
+            if confirmed_labels:
+                psi_strengths = [
+                    f"ℹ️ JS-rendered result used as authoritative source for: {', '.join(confirmed_labels)}"
+                ] + psi_strengths
+
         all_issues    = list(dict.fromkeys(psi_issues    + crawl_extra_issues))
         all_strengths = list(dict.fromkeys(psi_strengths + crawl_extra_strengths))
 

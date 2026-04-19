@@ -915,11 +915,11 @@ class DocxReportGenerator:
             if breakdown:
                 self._subsection(doc, "GBP Score Breakdown")
                 self._detail_table(doc, ["COMPONENT", "MAX PTS", "SCORED"], [
-                    ("Profile Complete",  "25", str(breakdown.get("profile_complete", 0))),
-                    ("Has Reviews",       "25", str(breakdown.get("has_reviews", 0))),
-                    ("Has Photos",        "20", str(breakdown.get("has_photos", 0))),
-                    ("Has GBP Posts",     "15", "— (requires GBP API)"),
-                    ("Is Verified",       "15", str(breakdown.get("is_verified", 0))),
+                    ("Listing Confirmed", "35", str(breakdown.get("listing_confirmed", 0))),
+                    ("NAP on Website",    "25", str(breakdown.get("nap_on_website",    0))),
+                    ("Reviews Promoted",  "25", str(breakdown.get("reviews_promoted",  0))),
+                    ("Schema Markup",     "15", str(breakdown.get("schema_markup",     0))),
+                    ("NAP Consistent",    "5",  str(breakdown.get("nap_consistent",    0))),
                 ], col_widths=[Inches(2.2), Inches(1.0), Inches(2.8)])
 
             self._issues_strengths(doc, gbp.get("issues", []), gbp.get("strengths", []))

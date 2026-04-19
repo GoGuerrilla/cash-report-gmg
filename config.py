@@ -74,6 +74,11 @@ class ClientConfig:
     preloaded_channel_data: Dict[str, Any] = field(default_factory=dict)
     top_competitors: List[str] = field(default_factory=list)
 
+    # ── Audit provenance ───────────────────────────────────────
+    # "full_intake"    — came from Typeform webhook or Wix /cash-report form
+    # "admin_url_only" — triggered from /admin portal (URL + email only; no intake data)
+    audit_source: str = "full_intake"
+
     @property
     def active_social_channels(self):
         channels = []

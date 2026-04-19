@@ -599,7 +599,7 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
             from auditors.youtube_api import YouTubeAuditor
             yt = YouTubeAuditor(config.youtube_channel_url, yt_key).fetch()
             log.info("TIMING  youtube_api             %.2fs", time.time() - _t)
-            if yt.get("data_source") == "youtube_data_api":
+            if yt.get("data_source") == "youtube_api_v3":
                 for key in ("posts_per_week", "days_since_last_post", "is_active"):
                     if yt.get(key) is not None:
                         channel_data["youtube"][key] = yt[key]
@@ -1019,6 +1019,8 @@ def webhook():
         log.error("Config build failed: %s", e)
         return jsonify({"error": "config build failed"}), 500
 
+    config.audit_source = "full_intake"
+
     contact_email = config.contact_email
     website_url   = config.website_url or config.linktree_url
     ip_address    = request.remote_addr or None
@@ -1111,6 +1113,8 @@ def cash_report():
     except Exception as e:
         log.error("Config build failed for Wix submission: %s", e)
         return _add_cors(jsonify({"success": False, "message": "Submission failed"})), 500
+
+    config.audit_source = "full_intake"
 
     contact_email = config.contact_email
     website_url   = config.website_url or config.linktree_url
@@ -1498,6 +1502,8 @@ def admin_trigger():
         log.error("Admin trigger config build failed: %s", exc)
         msg = f"Config build failed: {str(exc)[:80]}"
         return redirect("/admin?" + urlencode({"flash": msg, "ft": "err"}))
+
+    config.audit_source = "admin_url_only"
 
     rl    = RateLimiter(bypass=True)
     token = f"admin-{contact_email}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"

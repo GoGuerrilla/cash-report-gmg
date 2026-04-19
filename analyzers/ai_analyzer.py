@@ -250,12 +250,22 @@ class AIAnalyzer:
         def _u(val, default, note="unverified — not in intake form"):
             return str(val) if val != default else f"{val} ({note})"
 
+        # Build modifier context string for the prompt
+        _mods     = self._apply_intake_modifiers(config, dict(cash))  # non-mutating copy
+        _mod_lines = "\n".join(f"  {n}" for n in _mods.get("notes", [])) or "  None"
+        _flag_lines = "\n".join(f"  ⚠ {f}" for f in _mods.get("flags", [])) or "  None"
+
         return f"""You are a senior B2B digital marketing strategist. Analyze this real marketing audit data and respond ONLY with valid JSON — no markdown, no explanation.
 
 CLIENT: {config.client_name}
 INDUSTRY: {config.client_industry}
+AUDIT SOURCE: {getattr(config, 'audit_source', 'full_intake')}
 STATED TARGET MARKET: {config.stated_target_market or "Not provided"}
 BIGGEST CHALLENGE: {config.biggest_marketing_challenge or "Not provided"}
+INTAKE SCORE MODIFIERS APPLIED:
+{_mod_lines}
+INTAKE FLAGS:
+{_flag_lines}
 STATED VALUE PROP: {config.stated_value_prop or "Not provided"}
 PRIMARY GOAL: {config.primary_goal}
 MONTHLY AD BUDGET: ${config.monthly_ad_budget:,.0f}
@@ -361,6 +371,172 @@ Respond with ONLY this exact JSON (no markdown fences, no extra keys):
         except Exception:
             return {"executive_summary": raw[:500], "parse_error": True}
 
+    # ── Intake modifier system ────────────────────────────────
+
+    def _apply_intake_modifiers(self, config: ClientConfig, scores: dict) -> dict:
+        """
+        Adjust C/A/S/H scores using verified intake form values.
+        Only runs when audit_source == "full_intake" — admin URL-only audits
+        are left unmodified so missing intake fields don't artificially penalise them.
+
+        Modifiers (all scores clamped to 0–100 after adjustment):
+
+        H score — Hold / Retention
+          email_list_size == 0              → -10  (no email list)
+          email_list_size 1–999             →  ±0  (small but present)
+          email_list_size 1,000–4,999       →  +5  (established list)
+          email_list_size 5,000+            → +10  (scaled list)
+          email_frequency == "daily"        →  +5  (maximum cadence)
+          email_frequency == "weekly"       →  +5  (strong cadence)
+          email_frequency == "never"        → -10  (inactive / dormant)
+
+        S score — Sales / Acquisition
+          ad_budget == $0                   →  ±0  + flag "no paid acquisition"
+          ad_budget $1–$999                 →  +2  (testing budget)
+          ad_budget $1,000–$2,499           →  +5  (moderate budget)
+          ad_budget $2,500+                 → +10  (strong budget)
+
+        A score — Audience / ICP
+          stated_target_market non-empty    →  +5  (ICP defined in intake)
+
+        Overall score is recomputed after all deltas are applied using the
+        same weights as _compute_cash_scores: C×0.20 + A×0.30 + S×0.30 + H×0.20.
+
+        Returns a modifier report dict included in ai_insights["intake_modifiers"].
+        """
+        audit_source = getattr(config, "audit_source", "full_intake")
+        if audit_source != "full_intake":
+            return {
+                "applied": False,
+                "reason":  "audit_source=admin_url_only — modifiers skipped (no intake data)",
+                "h_delta": 0, "s_delta": 0, "a_delta": 0,
+                "notes":   [], "flags":   [],
+            }
+
+        notes  = []
+        flags  = []
+        h_delta = 0
+        s_delta = 0
+        a_delta = 0
+
+        # ── H: email list size ────────────────────────────────
+        list_size = config.email_list_size
+        if list_size == 0:
+            h_delta -= 10
+            notes.append("H −10: no email list (email_list_size = 0)")
+        elif list_size >= 5000:
+            h_delta += 10
+            notes.append(f"H +10: scaled email list ({list_size:,} contacts ≥ 5,000)")
+        elif list_size >= 1000:
+            h_delta += 5
+            notes.append(f"H +5: established email list ({list_size:,} contacts, 1,000–4,999)")
+        # 1–999: no modifier — small list present but not yet meaningful scale
+
+        # ── H: email send frequency ───────────────────────────
+        freq = (config.email_send_frequency or "").lower().strip()
+        if freq in ("daily", "weekly"):
+            h_delta += 5
+            notes.append(f"H +5: active email cadence ({freq})")
+        elif freq == "never":
+            h_delta -= 10
+            notes.append("H −10: email_frequency = never (dormant list)")
+
+        # ── S: monthly ad budget ──────────────────────────────
+        budget = config.monthly_ad_budget
+        if budget == 0:
+            flags.append(
+                "no paid acquisition — client reported $0 ad budget; "
+                "recommend allocating at minimum $500–1,000/month"
+            )
+        elif budget < 1000:
+            s_delta += 2
+            notes.append(f"S +2: small ad budget (${budget:,.0f}/month, $1–$999)")
+        elif budget < 2500:
+            s_delta += 5
+            notes.append(f"S +5: moderate ad budget (${budget:,.0f}/month, $1,000–$2,499)")
+        else:
+            s_delta += 10
+            notes.append(f"S +10: strong ad budget (${budget:,.0f}/month, $2,500+)")
+
+        # ── A: ICP / target market defined ───────────────────
+        if (config.stated_target_market or "").strip():
+            a_delta += 5
+            notes.append("A +5: target market / ICP defined in intake form")
+
+        # ── Apply deltas; clamp 0–100 ─────────────────────────
+        scores["H"] = max(0, min(100, scores["H"] + h_delta))
+        scores["S"] = max(0, min(100, scores["S"] + s_delta))
+        scores["A"] = max(0, min(100, scores["A"] + a_delta))
+
+        # Recompute overall with canonical weights
+        scores["overall"] = round(
+            scores["C"] * 0.20 +
+            scores["A"] * 0.30 +
+            scores["S"] * 0.30 +
+            scores["H"] * 0.20
+        )
+
+        return {
+            "applied":  True,
+            "h_delta":  h_delta,
+            "s_delta":  s_delta,
+            "a_delta":  a_delta,
+            "notes":    notes,
+            "flags":    flags,
+        }
+
+    def _weight_plan_by_challenge(self, plan: list, challenge: str) -> list:
+        """
+        Inspect biggest_challenge text and promote the most relevant
+        90-day plan item to the Week 1-2 position.
+
+        Challenge keyword → plan index most likely to address it:
+          leads / traffic / pipeline / acquisition  → index 1 (lead magnet / opt-in)
+          retention / churn / repeat / loyal        → index 3 (newsletter / nurture system)
+          conversion / close / sales / booking      → index 2 (authority content / social proof)
+          brand / awareness / visibility / found    → index 0 (messaging / ICP alignment)
+
+        If no keyword matches, or the matched index is already 0, the plan is
+        returned unchanged. Week labels are reassigned after reordering.
+        """
+        if not challenge or len(plan) < 2:
+            return plan
+
+        cl = challenge.lower()
+
+        # keyword group → preferred plan index (0-based)
+        _KEYWORD_MAP = [
+            (["lead", "traffic", "prospect", "pipeline", "get client",
+              "acquisition", "get more client", "not enough client"],     1),
+            (["retention", "churn", "repeat", "loyal", "keep client",
+              "keep customer", "re-engage"],                               3),
+            (["conversion", "close", "sales", "convert", "booking",
+              "not closing", "follow.up", "follow up"],                   2),
+            (["brand", "awareness", "visibility", "recognition",
+              "get found", "known", "stand out"],                         0),
+        ]
+
+        priority_index = None
+        for keywords, idx in _KEYWORD_MAP:
+            if any(k in cl for k in keywords):
+                priority_index = idx
+                break
+
+        if priority_index is None or priority_index == 0:
+            return plan   # already leading with the right item, or no match
+
+        # Reorder: move matched item to front; keep others in original sequence
+        reordered = [plan[priority_index]] + [p for i, p in enumerate(plan) if i != priority_index]
+
+        # Relabel weeks in order
+        week_labels = ["1-2", "3-4", "5-8", "9-12"]
+        result = []
+        for item, label in zip(reordered, week_labels):
+            new_item = dict(item)
+            new_item["week"] = label
+            result.append(new_item)
+        return result
+
     # ── C.A.S.H. score computation (always from real data) ────
 
     def _compute_cash_scores(self, config: ClientConfig, audit_data: dict) -> Dict:
@@ -403,8 +579,15 @@ Respond with ONLY this exact JSON (no markdown fences, no extra keys):
         Computes all quantitative fields AND baseline narrative fields from real audit data.
         When Claude/OpenAI key is present their responses overlay these values.
         When no key is available the report still contains meaningful, data-driven content.
+
+        Score pipeline:
+          1. _compute_cash_scores()       — pure auditor-data scores
+          2. _apply_intake_modifiers()    — adjusts C/A/S/H for verified intake values
+          3. _weight_plan_by_challenge()  — reorders 90-day plan to address stated challenge first
         """
-        cash      = self._compute_cash_scores(config, audit_data)
+        cash            = self._compute_cash_scores(config, audit_data)
+        intake_mods     = self._apply_intake_modifiers(config, cash)
+        # cash dict is mutated in place by _apply_intake_modifiers; overall is recomputed
         score     = cash["overall"]
         grade     = "A" if score >= 80 else "B" if score >= 65 else "C" if score >= 50 else "D" if score >= 35 else "F"
         icp_verdict = audit_data.get("icp", {}).get("icp_verdict", "")
@@ -573,7 +756,7 @@ Respond with ONLY this exact JSON (no markdown fences, no extra keys):
                 f"website visitors."
             )
 
-        # ── 90-day action plan (from real findings) ─────────────
+        # ── 90-day action plan (from real findings, weighted by challenge) ──
         plan_90 = [
             {
                 "week":    "1-2",
@@ -619,6 +802,10 @@ Respond with ONLY this exact JSON (no markdown fences, no extra keys):
                 "outcome": "Full nurture system operational; measurable pipeline activity",
             },
         ]
+        # Reorder plan so the item most relevant to the client's stated challenge leads
+        plan_90 = self._weight_plan_by_challenge(
+            plan_90, config.biggest_marketing_challenge
+        )
 
         # ── Competitive positioning ─────────────────────────────
         competitors = config.top_competitors
@@ -633,6 +820,8 @@ Respond with ONLY this exact JSON (no markdown fences, no extra keys):
 
         return {
             "data_source":            "rule_based",
+            "audit_source":           getattr(config, "audit_source", "full_intake"),
+            "intake_modifiers":       intake_mods,
             "overall_grade":          grade,
             "overall_score":          score,
             "cash_c_score":           cash["C"],

@@ -18,8 +18,12 @@ All checks degrade gracefully: unreachable competitor → 50 neutral with a note
 Only the homepage is crawled (max_pages=1) to keep run-time short.
 """
 import re
+import time
+import logging
 from urllib.parse import urlparse
 from typing import Dict, Any, List
+
+log = logging.getLogger(__name__)
 
 from config import ClientConfig
 
@@ -171,12 +175,16 @@ class CompetitorAuditor:
         }
         if self.api_key:
             params["key"] = self.api_key
-        try:
-            r = requests.get(PAGESPEED_ENDPOINT, params=params, timeout=60)
-            if r.status_code == 200:
-                return r.json()
-        except Exception:
-            pass
+        for attempt in range(2):
+            try:
+                r = requests.get(PAGESPEED_ENDPOINT, params=params, timeout=60)
+                if r.status_code == 200:
+                    return r.json()
+                log.warning("PageSpeed non-200 for %s: %s", url, r.status_code)
+            except Exception as e:
+                log.warning("PageSpeed timeout/error for %s: %s", url, e)
+            if attempt == 0:
+                time.sleep(2)
         return {}
 
     def _scrape_homepage(self, url: str):
