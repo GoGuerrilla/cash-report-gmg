@@ -1482,6 +1482,14 @@ def admin_trigger():
         msg = "Website URL and contact email are required."
         return redirect("/admin?" + urlencode({"flash": msg, "ft": "err"}))
 
+    if not business_name and website_url:
+        _u = website_url.lower()
+        for _pfx in ("https://www.", "http://www.", "https://", "http://"):
+            if _u.startswith(_pfx):
+                _u = _u[len(_pfx):]
+                break
+        business_name = _u.rstrip("/").capitalize()
+
     parsed = {
         "business_name":     business_name or "Manual Audit",
         "website_url":       website_url,
