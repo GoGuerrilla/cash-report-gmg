@@ -119,8 +119,39 @@ class GEOAuditor:
             }
 
     def _run_inner(self) -> Dict[str, Any]:
-        # One scrape shared by on-page and schema checks
-        self._onpage = self._scrape_homepage()
+        # Prefer SEO Playwright-rendered signals over a fresh static scrape
+        # to avoid false negatives on JS-rendered sites (Wix, Squarespace, etc.)
+        seo_cs = self.seo_data.get("crawl_signals", {})
+        seo_vs = seo_cs.get("validation_states", {})
+        has_rendered = any(v == "found_rendered" for v in seo_vs.values())
+
+        if seo_cs and (has_rendered or seo_cs.get("title") or seo_cs.get("h1s")):
+            # Build _onpage from SEO crawl_signals — already JS-rendered, no extra quota
+            self._onpage = {
+                "title":            seo_cs.get("title", ""),
+                "meta_description": seo_cs.get("meta_description", ""),
+                "h1s":              seo_cs.get("h1s", []),
+                "h2s":              seo_cs.get("h2s", []),
+                "schema_types":     seo_cs.get("schema_types", []),
+                "has_faq_schema":   seo_cs.get("has_faq_schema", False),
+                "word_count":       seo_cs.get("word_count", 0),
+                "canonical_url":    seo_cs.get("canonical_url", ""),
+                "has_canonical":    seo_cs.get("has_canonical", False),
+                "is_noindex":       not seo_cs.get("is_indexable", True),
+                "og_tags":          seo_cs.get("og_tags", []),
+                "has_og_tags":      seo_cs.get("has_og_tags", False),
+                "has_og_image":     seo_cs.get("has_og_image", False),
+                "has_og_title":     seo_cs.get("has_og_title", False),
+                "twitter_tags":     seo_cs.get("twitter_tags", []),
+                "has_twitter_card": seo_cs.get("has_twitter_card", False),
+                "platform":         seo_cs.get("platform", ""),
+            }
+            import logging as _lg
+            _lg.getLogger("webhook").info(
+                "GEO: using SEO Playwright signals (has_rendered=%s) — skipping fresh scrape",
+                has_rendered)
+        else:
+            self._onpage = self._scrape_homepage()
 
         # All seven components
         serp      = self._score_serp_visibility()

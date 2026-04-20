@@ -596,6 +596,8 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
                             "subscriber_count", "total_video_count", "videos_last_30_days"):
                     if yt.get(key) is not None:
                         channel_data["youtube"][key] = yt[key]
+                # Alias for FunnelAuditor compatibility
+                channel_data["youtube"]["recent_video_count"] = yt.get("videos_last_30_days", 0) or 0
                 log.info("YouTube: subscribers=%s  total_videos=%s  videos_last_30=%s  ppw=%s",
                          yt.get("subscriber_count"), yt.get("total_video_count"),
                          yt.get("videos_last_30_days"), yt.get("posts_per_week"))
@@ -700,6 +702,65 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
             audit_data["seo"],        _ = fut_seo.result()
             audit_data["gbp"],        _ = fut_gbp.result()
             audit_data["analytics"],  _ = fut_ga.result()
+
+        # ── JS render override: SEO Playwright results → Website static results ─
+        # When SEO's Playwright renderer confirms a signal as "found_rendered",
+        # suppress the corresponding false-positive issues from the static scrape
+        # and update validation_states so GEO + report generators see correct values.
+        seo_cs   = audit_data["seo"].get("crawl_signals", {})
+        seo_vs   = seo_cs.get("validation_states", {})
+        upgraded = [k for k, v in seo_vs.items() if v == "found_rendered"]
+
+        if upgraded:
+            web_hp = audit_data["website"].get("homepage", {})
+            web_vs = web_hp.get("validation_states", {})
+
+            # Issue strings to remove when JS render confirms the signal is present
+            _suppress = {
+                "title":     ["missing title tag", "title could not be validated"],
+                "meta":      ["Missing meta description", "Meta description could not be validated"],
+                "h1":        ["No H1 heading found", "H1 heading could not be validated"],
+                "schema":    ["No structured data found", "Structured data could not be validated"],
+                "og":        [],
+                "canonical": [],
+            }
+            for sig in upgraded:
+                if sig in _suppress:
+                    web_vs[sig] = "found_rendered"
+                    patterns = _suppress[sig]
+                    if patterns:
+                        audit_data["website"]["issues"] = [
+                            i for i in audit_data["website"].get("issues", [])
+                            if not any(p in i for p in patterns)
+                        ]
+                    log.info("JS render override: signal=%r → found_rendered, false flag suppressed", sig)
+
+            # Copy rendered field values from SEO crawl_signals into website homepage
+            _field_map = {
+                "title":     "title",
+                "meta":      "meta_description",
+                "h1":        "h1s",
+                "schema":    "schema_types",
+                "og":        "has_og_tags",
+                "canonical": "canonical_url",
+            }
+            for sig, field in _field_map.items():
+                if sig in upgraded and field in seo_cs:
+                    web_hp[field] = seo_cs[field]
+
+            # Viewport: not tracked by SEO render — suppress false flag on JS-platform sites
+            # when renderer successfully found other signals (proving JS execution worked)
+            platform = (audit_data["website"].get("platform") or
+                        audit_data["seo"].get("platform") or "").lower()
+            if web_vs.get("viewport") == "missing" and platform in ("wix", "squarespace", "webflow", "spa"):
+                web_vs["viewport"] = "found_rendered"
+                audit_data["website"]["issues"] = [
+                    i for i in audit_data["website"].get("issues", [])
+                    if "viewport" not in i.lower()
+                ]
+                log.info("JS render override: viewport suppressed for platform=%r", platform)
+
+            log.info("JS render override complete: upgraded=%s  platform=%r", upgraded, platform)
 
         _merge_website_data(channel_data, audit_data["website"])
 

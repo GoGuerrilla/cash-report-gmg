@@ -131,9 +131,10 @@ def _merge_website_data(channel_data: dict, website_audit: dict):
     if website_audit.get("status") not in ("ok",):
         return  # Crawl failed — keep None placeholders
 
-    homepage = website_audit.get("homepage", {})
-    pages    = website_audit.get("pages", [])
-    site     = channel_data["website"]
+    homepage     = website_audit.get("homepage", {})
+    pages        = website_audit.get("pages", [])
+    page_urls_lc = [p.get("url", "").lower() for p in pages]
+    site         = channel_data["website"]
 
     # Pull homepage-level structural signals added by WebsiteAuditor
     hp_lead_magnet_url = homepage.get("lead_magnet_url")
@@ -183,8 +184,13 @@ def _merge_website_data(channel_data: dict, website_audit: dict):
     )
     site["has_newsletter"]    = _has("newsletter", "weekly email", "biweekly",
                                       "subscribe to our")
-    site["has_blog"]          = _has("blog", "article", "post", "read more",
-                                      "latest news")
+    # Blog: URL slug check is reliable even on Wix (crawled nav page URLs don't require JS)
+    _blog_slugs = ("/blog", "/articles", "/news", "/posts", "/marketing-insights",
+                   "/insights", "/resources", "/content")
+    site["has_blog"] = (
+        any(slug in url for url in page_urls_lc for slug in _blog_slugs)
+        or _has("blog", "article", "post", "read more", "latest news")
+    )
     site["has_podcast"]       = _has("podcast", "listen", "episode", "spotify")
     site["has_pricing"]       = _has("pricing", "price", "per month", "/month",
                                       "starting at", "packages")
@@ -193,8 +199,15 @@ def _merge_website_data(channel_data: dict, website_audit: dict):
     site["has_proposal_cta"]  = _has("get a proposal", "free audit", "free consultation",
                                       "request a quote", "book a call")
     site["has_free_trial"]    = _has("free trial", "try for free", "start free")
-    site["has_testimonials"]  = _has("testimonial", "review", "what our clients",
-                                      "five star", "★", "⭐")
+    # Testimonials: schema markup and URL slugs are reliable on Wix (JS widgets invisible to text scan)
+    hp_schema_lc = [s.lower() for s in homepage.get("schema_types", [])]
+    _review_slugs = ("/testimonials", "/reviews", "/results", "/success-stories",
+                     "/case-studies", "/clients", "/portfolio")
+    site["has_testimonials"] = (
+        any(s in hp_schema_lc for s in ("review", "aggregaterating"))
+        or any(slug in url for url in page_urls_lc for slug in _review_slugs)
+        or _has("testimonial", "review", "what our clients", "five star", "★", "⭐")
+    )
     site["has_certifications"] = _has("certified", "certification", "google partner",
                                        "hubspot", "credential")
     site["has_media_mentions"] = _has("featured in", "as seen in", "press", "media")
