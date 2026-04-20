@@ -755,6 +755,81 @@ class DocxReportGenerator:
                 for r in recs
             ], col_widths=[Inches(0.8), Inches(1.7), Inches(2.5), Inches(1.0)])
 
+        # Social Media Snapshot
+        ch_data    = self.config.preloaded_channel_data
+        yt_metrics = self.data.get("content", {}).get("youtube_metrics") or {}
+        fresh_ch   = self.data.get("freshness", {}).get("channels", {})
+        meta_token = bool(getattr(self.config, "meta_page_access_token", None))
+
+        def _fmt_c(v):   return f"{int(v):,}" if v is not None else "—"
+        def _fmt_p(v):   return str(v) if v is not None else "—"
+        def _fmt_d(v):   return str(v) if v is not None else "—"
+        def _active(ppw, pending=False):
+            if pending:     return "Pending API"
+            if ppw is None: return "—"
+            if ppw >= 1:    return "✅ Yes"
+            if ppw > 0:     return "⚠️ Low"
+            return "🔴 Inactive"
+
+        snap_rows = []
+
+        if self.config.linkedin_url:
+            li = ch_data.get("linkedin", {})
+            snap_rows.append((
+                "LinkedIn",
+                _fmt_c(li.get("followers")),
+                _fmt_p(li.get("posts_per_week")),
+                _fmt_d(li.get("days_since_last_post")
+                       or fresh_ch.get("LinkedIn", {}).get("days_since_last_post")),
+                _active(li.get("posts_per_week")),
+            ))
+
+        if self.config.youtube_url:
+            snap_rows.append((
+                "YouTube",
+                _fmt_c(yt_metrics.get("subscriber_count")),
+                _fmt_p(yt_metrics.get("posts_per_week")),
+                _fmt_d(yt_metrics.get("days_since_last_post")),
+                _active(yt_metrics.get("posts_per_week")),
+            ))
+
+        if self.config.facebook_url:
+            if meta_token:
+                fb = ch_data.get("facebook", {})
+                snap_rows.append((
+                    "Facebook",
+                    _fmt_c(fb.get("followers")),
+                    _fmt_p(fb.get("posts_per_week")),
+                    _fmt_d(fb.get("days_since_last_post")
+                           or fresh_ch.get("Facebook", {}).get("days_since_last_post")),
+                    _active(fb.get("posts_per_week")),
+                ))
+            else:
+                snap_rows.append(("Facebook", "—", "—", "—", "Pending API"))
+
+        if self.config.instagram_url:
+            if meta_token:
+                ig = ch_data.get("instagram", {})
+                snap_rows.append((
+                    "Instagram",
+                    _fmt_c(ig.get("followers")),
+                    _fmt_p(ig.get("posts_per_week")),
+                    _fmt_d(ig.get("days_since_last_post")
+                           or fresh_ch.get("Instagram", {}).get("days_since_last_post")),
+                    _active(ig.get("posts_per_week")),
+                ))
+            else:
+                snap_rows.append(("Instagram", "—", "—", "—", "Pending API"))
+
+        if snap_rows:
+            self._subsection(doc, "Social Media Snapshot")
+            self._detail_table(
+                doc,
+                ["PLATFORM", "FOLLOWERS / SUBSCRIBERS", "POSTS/WEEK", "DAYS SINCE POST", "ACTIVE"],
+                snap_rows,
+                col_widths=[Inches(1.4), Inches(1.4), Inches(0.9), Inches(1.1), Inches(1.2)],
+            )
+
         cr = self.ai.get("channel_recommendation", "")
         if cr:
             self._subsection(doc, "Channel Strategy")

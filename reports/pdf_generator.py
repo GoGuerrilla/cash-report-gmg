@@ -902,6 +902,111 @@ class PDFReportGenerator:
             body += _sub("Audience & ICP Recommendations")
             body += _rec_table(rec_rows)
 
+        # ── Social Media Snapshot ──────────────────────────────
+        ch_data    = self.config.preloaded_channel_data
+        yt_metrics = self.data.get("content", {}).get("youtube_metrics") or {}
+        fresh_ch   = self.data.get("freshness", {}).get("channels", {})
+        meta_token = bool(getattr(self.config, "meta_page_access_token", None))
+
+        def _fmt_count(val):
+            return f"{int(val):,}" if val is not None else "—"
+
+        def _fmt_ppw(val):
+            return str(val) if val is not None else "—"
+
+        def _fmt_days(val):
+            return str(val) if val is not None else "—"
+
+        def _active_badge(ppw, days, pending=False):
+            if pending:
+                return _sbadge("gray", "Pending API")
+            if ppw is not None and ppw >= 1:
+                return f'{_sdot("g")}{_sbadge("ok", "Yes")}'
+            if ppw is not None and ppw > 0:
+                return f'{_sdot("y")}{_sbadge("warn", "Low")}'
+            return f'{_sdot("r")}{_sbadge("critical", "Inactive")}'
+
+        snap_rows = []
+
+        # LinkedIn
+        if self.config.linkedin_url:
+            li = ch_data.get("linkedin", {})
+            snap_rows.append((
+                "LinkedIn",
+                _fmt_count(li.get("followers")),
+                _fmt_ppw(li.get("posts_per_week")),
+                _fmt_days(li.get("days_since_last_post")
+                          or fresh_ch.get("LinkedIn", {}).get("days_since_last_post")),
+                _active_badge(li.get("posts_per_week"),
+                              li.get("days_since_last_post")),
+            ))
+
+        # YouTube
+        if self.config.youtube_url:
+            snap_rows.append((
+                "YouTube",
+                _fmt_count(yt_metrics.get("subscriber_count")),
+                _fmt_ppw(yt_metrics.get("posts_per_week")),
+                _fmt_days(yt_metrics.get("days_since_last_post")),
+                _active_badge(yt_metrics.get("posts_per_week"),
+                              yt_metrics.get("days_since_last_post")),
+            ))
+
+        # Facebook
+        if self.config.facebook_url:
+            if meta_token:
+                fb = ch_data.get("facebook", {})
+                snap_rows.append((
+                    "Facebook",
+                    _fmt_count(fb.get("followers")),
+                    _fmt_ppw(fb.get("posts_per_week")),
+                    _fmt_days(fb.get("days_since_last_post")
+                              or fresh_ch.get("Facebook", {}).get("days_since_last_post")),
+                    _active_badge(fb.get("posts_per_week"),
+                                  fb.get("days_since_last_post")),
+                ))
+            else:
+                snap_rows.append(("Facebook", "—", "—", "—",
+                                  _sbadge("gray", "Pending API")))
+
+        # Instagram
+        if self.config.instagram_url:
+            if meta_token:
+                ig = ch_data.get("instagram", {})
+                snap_rows.append((
+                    "Instagram",
+                    _fmt_count(ig.get("followers")),
+                    _fmt_ppw(ig.get("posts_per_week")),
+                    _fmt_days(ig.get("days_since_last_post")
+                              or fresh_ch.get("Instagram", {}).get("days_since_last_post")),
+                    _active_badge(ig.get("posts_per_week"),
+                                  ig.get("days_since_last_post")),
+                ))
+            else:
+                snap_rows.append(("Instagram", "—", "—", "—",
+                                  _sbadge("gray", "Pending API")))
+
+        if snap_rows:
+            snap_tbody = "".join(
+                f'<tr>'
+                f'<td class="td-name">{_h(r[0])}</td>'
+                f'<td>{r[1]}</td>'
+                f'<td>{r[2]}</td>'
+                f'<td>{r[3]}</td>'
+                f'<td>{r[4]}</td>'
+                f'</tr>'
+                for r in snap_rows
+            )
+            snap_table = (
+                f'<table class="data-table">'
+                f'<thead><tr>'
+                f'<th>Platform</th><th>Followers / Subscribers</th>'
+                f'<th>Posts/Week</th><th>Days Since Post</th><th>Active</th>'
+                f'</tr></thead>'
+                f'<tbody>{snap_tbody}</tbody></table>'
+            )
+            body += f'{_sub("Social Media Snapshot")}{snap_table}'
+
         if strategy:
             body += f'<div class="strategy-box">{_h(strategy)}</div>'
 
