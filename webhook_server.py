@@ -586,15 +586,24 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
         yt_key = os.environ.get("YOUTUBE_API_KEY", "")
         if yt_key:
             log.info("Fetching YouTube data...")
+            log.info("YouTube channel URL → %s  (key_len=%s)", config.youtube_channel_url, len(yt_key))
             _t = time.time()
             from auditors.youtube_api import YouTubeAuditor
             yt = YouTubeAuditor(config.youtube_channel_url, yt_key).fetch()
             log.info("TIMING  youtube_api             %.2fs", time.time() - _t)
             if yt.get("data_source") == "youtube_api_v3":
-                for key in ("posts_per_week", "days_since_last_post", "is_active"):
+                for key in ("posts_per_week", "days_since_last_post", "is_active",
+                            "subscriber_count", "total_video_count", "videos_last_30_days"):
                     if yt.get(key) is not None:
                         channel_data["youtube"][key] = yt[key]
-                log.info("YouTube: subs=%s ppw=%s", yt.get("subscriber_count"), yt.get("posts_per_week"))
+                log.info("YouTube: subscribers=%s  total_videos=%s  videos_last_30=%s  ppw=%s",
+                         yt.get("subscriber_count"), yt.get("total_video_count"),
+                         yt.get("videos_last_30_days"), yt.get("posts_per_week"))
+            else:
+                log.warning("YouTube API failed: raw_url=%s  error=%r  source=%s",
+                            config.youtube_channel_url, yt.get("error"), yt.get("data_source"))
+        else:
+            log.warning("YouTube: YOUTUBE_API_KEY not set — channel scored at 50 neutral")
 
     # ── 1d. Meta Graph API ────────────────────────────────────────
     meta_app_id = os.environ.get("META_APP_ID", "")
@@ -615,6 +624,8 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
             page_access_token=meta_pg_tok,
         ).fetch()
         log.info("TIMING  meta_api                %.2fs", time.time() - _t)
+        log.info("Meta: facebook_page_id=%r  instagram=%r  page_token=%s",
+                 fb_page, config.instagram_handle, "set" if meta_pg_tok else "NOT SET")
         fb = meta_result.get("facebook", {})
         ig = meta_result.get("instagram", {})
         if fb.get("data_source") == "meta_graph_api":
@@ -623,12 +634,22 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
                 if fb.get(key) is not None:
                     channel_data["facebook"][key] = fb[key]
             channel_data["facebook"]["is_active"] = True
+            log.info("Facebook: followers=%s  ppw=%s  engagement_rate=%s",
+                     fb.get("followers"), fb.get("posts_per_week"), fb.get("engagement_rate"))
+        else:
+            log.warning("Facebook API failed: source=%s  error=%r  page_id=%r",
+                        fb.get("data_source"), fb.get("error"), fb_page)
         if ig.get("data_source") == "meta_graph_api":
             for key in ("followers", "posts_per_week", "days_since_last_post",
                         "engagement_rate", "media_count"):
                 if ig.get(key) is not None:
                     channel_data["instagram"][key] = ig[key]
             channel_data["instagram"]["is_active"] = True
+            log.info("Instagram: followers=%s  ppw=%s",
+                     ig.get("followers"), ig.get("posts_per_week"))
+        else:
+            log.warning("Instagram API failed: source=%s  error=%r  handle=%r",
+                        ig.get("data_source"), ig.get("error"), config.instagram_handle)
         audit_data["meta"] = meta_result
 
     log.info("TIMING  PHASE1_social_collection  %.2fs", time.time() - phase1_start)

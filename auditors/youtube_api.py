@@ -16,16 +16,32 @@ Quota cost: ~204 units per run (well within 10,000/day default).
 import urllib.request
 import urllib.parse
 import json
+import re
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
+
+log = logging.getLogger(__name__)
 
 
 class YouTubeAuditor:
     BASE_URL = "https://www.googleapis.com/youtube/v3"
 
     def __init__(self, channel_handle: str, api_key: str):
-        # Accept @goguerrilla or goguerrilla
-        self.handle  = channel_handle.lstrip("@")
+        # Normalise whatever form of YouTube identifier is passed:
+        #   https://www.youtube.com/@goguerrilla          → goguerrilla
+        #   https://www.youtube.com/@goguerrilla?sub_conf… → goguerrilla
+        #   https://youtube.com/@goguerrilla/              → goguerrilla
+        #   @goguerrilla                                   → goguerrilla
+        #   goguerrilla                                    → goguerrilla
+        raw = channel_handle.strip()
+        m = re.search(r"youtube\.com/@([^/?#\s]+)", raw, re.I)
+        if m:
+            handle = m.group(1).rstrip("/")
+        else:
+            handle = raw.lstrip("@").rstrip("/")
+        log.info("YouTube: resolving handle=%r  (raw input: %r)", handle, raw)
+        self.handle  = handle
         self.api_key = api_key
 
     # ── Internal HTTP helper ───────────────────────────────────
@@ -154,6 +170,12 @@ class YouTubeAuditor:
             if top_search.get("items"):
                 most_viewed_title = top_search["items"][0]["snippet"].get("title", "")
 
+            log.info(
+                "YouTube: channel_id=%s  subscribers=%s  total_videos=%s  "
+                "videos_last_30=%s  ppw=%s  days_since_last_post=%s",
+                channel_id, subscriber_count, total_videos,
+                videos_last_30, posts_per_week, days_since_last_post,
+            )
             return {
                 "is_active":              True,
                 "channel_id":             channel_id,
@@ -170,6 +192,10 @@ class YouTubeAuditor:
             }
 
         except Exception as exc:
+            log.warning(
+                "YouTube API error: handle=%r  key_len=%s  error=%s",
+                self.handle, len(self.api_key), exc,
+            )
             return {
                 "is_active":   None,
                 "error":       str(exc),
