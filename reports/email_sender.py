@@ -46,6 +46,18 @@ def _mime_type(path: str) -> str:
     return "application/pdf"
 
 
+def _body_no_attachment(client_name: str, overall_score, overall_grade) -> str:
+    return (
+        f"Hi,\n\n"
+        f"Your C.A.S.H. Report for {client_name} has been generated and is being processed.\n\n"
+        f"Overall C.A.S.H. Score: {overall_score}/100 ({overall_grade})\n\n"
+        f"Our team will follow up with your full report shortly. "
+        f"If you have any questions in the meantime, please contact gmg@goguerrilla.xyz\n\n"
+        f"A GMG strategist is already reviewing your results and will be reaching out "
+        f"with key insights and opportunities tailored to your business."
+    )
+
+
 def _body_text(client_name: str, overall_score, overall_grade,
                attachment_label: str = "PDF") -> str:
     return (
@@ -253,8 +265,23 @@ def send_report(
         log.error("Email skipped — report file not found at: %s", report_path)
         return False
 
+    # ── Choose body based on whether a report was generated ───────
     subject = f"Your C.A.S.H. Report is Ready — {client_name}"
-    body    = _body_text(client_name, overall_score, overall_grade, attachment_label)
+    if report_path is None:
+        log.error("PDF generation failed — sending fallback email to client")
+        body = _body_no_attachment(client_name, overall_score, overall_grade)
+        admin_addr = os.environ.get("ADMIN_NOTIFY_EMAIL", "gmg@goguerrilla.xyz").strip()
+        if sg_key and from_addr and admin_addr:
+            _send_sendgrid(
+                sg_key, from_addr, admin_addr,
+                f"⚠️ PDF Generation Failed — {client_name}",
+                f"PDF generation failed for client: {client_name}\n"
+                f"Recipient: {to_addr}\n\n"
+                f"The fallback 'report being processed' email has been sent to the client.\n"
+                f"Please follow up manually with the report.",
+            )
+    else:
+        body = _body_text(client_name, overall_score, overall_grade, attachment_label)
 
     # ── Send ──────────────────────────────────────────────────────
     if sg_key:
