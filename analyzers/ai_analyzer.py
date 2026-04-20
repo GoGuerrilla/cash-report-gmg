@@ -547,7 +547,6 @@ Respond with ONLY this exact JSON (no markdown fences, no extra keys):
         web    = audit_data.get("website", {}).get("scores", {})
         funnel = audit_data.get("funnel", {})
         stages = funnel.get("stages", {})
-        social_n = len(config.active_social_channels)
 
         def stage_score(stage: dict) -> int:
             # Count only real critical issues, not "could not be verified" ones
@@ -561,8 +560,62 @@ Respond with ONLY this exact JSON (no markdown fences, no extra keys):
             base   = 50 - (min(n_crit, 3) * 7) + (n_str * 8)
             return max(35, min(100, base)) if n_crit > 0 else max(50, min(100, 50 + n_str * 8))
 
+        # ── Quality-based social audience score ───────────────────────────
+        # LinkedIn: tiered by follower count + frequency bonus (cap 50).
+        # Other channels: binary presence + small confirmed-activity bonus (cap 40).
+        # Total social capped at 80 — same ceiling as old formula.
+        #
+        # Data sources (both are populated before Phase 4 runs):
+        #   LinkedIn followers/ppw  → config.preloaded_channel_data["linkedin"]
+        #   Other channels ppw/status → audit_data["freshness"]["channels"]
+        #     (already applies intake-frequency fallback and api_blocked neutrality)
+
+        li_data   = config.preloaded_channel_data.get("linkedin", {})
+        li_follow = li_data.get("followers")        # int or None
+        li_ppw    = li_data.get("posts_per_week")   # float or None
+
+        if not config.linkedin_url:
+            li_score = 0   # LinkedIn not configured
+        elif li_follow is None and li_ppw is None:
+            li_score = 15  # scrape failed — neutral, preserves old binary credit
+        else:
+            # Follower tier
+            if   li_follow is None:   li_pts = 10   # partial data — mid-tier neutral
+            elif li_follow == 0:      li_pts = 0
+            elif li_follow <= 100:    li_pts = 5
+            elif li_follow <= 500:    li_pts = 10
+            elif li_follow <= 2000:   li_pts = 20
+            elif li_follow <= 5000:   li_pts = 30
+            else:                     li_pts = 40   # 5,000+
+
+            # Posting frequency bonus
+            if   li_ppw is None:     li_freq = 3   # unknown — small neutral credit
+            elif li_ppw == 0:        li_freq = 0
+            elif li_ppw <= 2:        li_freq = 5
+            elif li_ppw <= 5:        li_freq = 10  # 3–5×/week: ideal
+            else:                    li_freq = 8   # 6+/week: slight overposting demerit
+
+            li_score = min(50, li_pts + li_freq)
+
+        # Other channels: binary presence + confirmed-activity bonus
+        fresh_channels = audit_data.get("freshness", {}).get("channels", {})
+        other_pts = 0
+        for ch in config.active_social_channels:
+            if ch == "LinkedIn":
+                continue
+            other_pts += 10                              # binary: channel URL configured
+            ch_data   = fresh_channels.get(ch, {})
+            ch_ppw    = ch_data.get("posts_per_week")
+            ch_status = ch_data.get("status", "")
+            if ch_ppw is not None and ch_ppw > 0:
+                other_pts += 3   # confirmed active
+            elif ch_status == "api_blocked":
+                other_pts += 2   # can't verify — partial credit, never penalise
+
+        social_score = min(80, li_score + min(40, other_pts))
+
         c = round((fresh + seo + web.get("content", 50)) / 3)
-        a = round((icp + brand + min(social_n * 15, 80)) / 3)
+        a = round((icp + brand + social_score) / 3)
         s = round((stage_score(stages.get("capture", {})) +
                    stage_score(stages.get("conversion", {})) +
                    web.get("conversion", 50)) / 3)
