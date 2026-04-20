@@ -45,6 +45,8 @@ from reports.email_sender import send_report
 from intake.client_db import save_audit_result
 from intake.rate_limiter import RateLimiter, get_public_ip
 from auditors.meta_auditor import MetaAuditor
+import logging
+log = logging.getLogger(__name__)
 
 
 def _check_env_keys():
@@ -133,6 +135,13 @@ def _merge_website_data(channel_data: dict, website_audit: dict):
     pages    = website_audit.get("pages", [])
     site     = channel_data["website"]
 
+    # Pull homepage-level structural signals added by WebsiteAuditor
+    hp_lead_magnet_url = homepage.get("lead_magnet_url")
+    hp_lead_magnet_cta = homepage.get("lead_magnet_cta", "")
+    hp_has_form        = homepage.get("has_form", False)
+    hp_has_iframe      = homepage.get("has_iframe", False)
+    hp_iframe_sources  = homepage.get("iframe_sources", [])
+
     # Combine all page text for keyword detection
     all_text = " ".join(
         " ".join([
@@ -147,13 +156,31 @@ def _merge_website_data(channel_data: dict, website_audit: dict):
         return any(kw in all_text for kw in keywords)
 
     # Derive boolean flags from crawled content
-    site["has_lead_magnet"]   = _has("free guide", "free download", "lead magnet",
-                                      "free ebook", "free resource", "free checklist")
-    site["has_email_optin"]   = _has("subscribe", "sign up", "opt in", "opt-in",
-                                      "join our list", "get updates") or \
-                                 homepage.get("has_email_visible", False)
-    site["has_contact_form"]  = _has("contact us", "get in touch", "send a message",
-                                      "contact form", "reach out")
+    # Lead magnet: link href match is authoritative; keyword scan is fallback
+    site["has_lead_magnet"] = bool(
+        hp_lead_magnet_url
+        or _has("free guide", "free download", "lead magnet",
+                "free ebook", "free resource", "free checklist",
+                "cash report", "cash-report")
+    )
+    if hp_lead_magnet_url:
+        log.info("Lead magnet scan: found=%s  cta=%r", hp_lead_magnet_url, hp_lead_magnet_cta)
+    else:
+        log.info("Lead magnet scan: none detected  has_form=%s  has_iframe=%s  iframes=%s",
+                 hp_has_form, hp_has_iframe, hp_iframe_sources or "[]")
+
+    # Email opt-in: also flag if a form or iframe exists on homepage
+    site["has_email_optin"] = (
+        _has("subscribe", "sign up", "opt in", "opt-in", "join our list", "get updates")
+        or hp_has_form
+        or hp_has_iframe
+        or homepage.get("has_email_visible", False)
+    )
+    # Contact form: also flag explicit <form> elements
+    site["has_contact_form"] = (
+        _has("contact us", "get in touch", "send a message", "contact form", "reach out")
+        or hp_has_form
+    )
     site["has_newsletter"]    = _has("newsletter", "weekly email", "biweekly",
                                       "subscribe to our")
     site["has_blog"]          = _has("blog", "article", "post", "read more",

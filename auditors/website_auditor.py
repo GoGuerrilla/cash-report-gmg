@@ -17,6 +17,7 @@ Design principles
 """
 import re
 import time
+import logging
 from urllib.parse import urljoin, urlparse
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -35,6 +36,20 @@ from auditors.scrape_utils import (
 )
 
 _JS_SPA_PLATFORMS = {"react", "vue"}
+
+log = logging.getLogger(__name__)
+
+# Lead magnet / funnel detection — scanned in _analyze_page() on the homepage
+_LEAD_MAGNET_HREF_KWS = (
+    "cash-report", "free-report", "free-audit", "lead-magnet",
+    "checklist", "guide", "download", "report", "get-my",
+    "free-guide", "ebook", "webinar", "resource", "audit",
+)
+_LEAD_MAGNET_TEXT_KWS = (
+    "free report", "free audit", "free guide", "free checklist",
+    "free download", "get your free", "get my free", "download now",
+    "get the report", "cash report", "free resource", "free ebook",
+)
 
 # Keywords used to identify the About page
 _ABOUT_SLUGS = frozenset({
@@ -312,6 +327,32 @@ class WebsiteAuditor:
         all_links    = soup.find_all("a", href=True)
         internal_cnt = sum(1 for a in all_links if self.domain in urljoin(url, a["href"]))
 
+        # ── Lead magnet / funnel signal detection ──────────────────────────
+        lead_magnet_url = None
+        lead_magnet_cta = None
+
+        for a in all_links:
+            href    = a.get("href", "")
+            href_lc = href.lower()
+            text_lc = a.get_text(" ", strip=True).lower()
+            if any(kw in href_lc for kw in _LEAD_MAGNET_HREF_KWS):
+                lead_magnet_url = href.strip()
+                lead_magnet_cta = a.get_text(" ", strip=True)
+                break
+            if not lead_magnet_url and any(kw in text_lc for kw in _LEAD_MAGNET_TEXT_KWS):
+                lead_magnet_url = href.strip()
+                lead_magnet_cta = a.get_text(" ", strip=True)
+
+        if not lead_magnet_url:
+            for btn in soup.find_all(["button", "input"]):
+                btn_text = (btn.get_text(" ", strip=True) or btn.get("value", "")).lower()
+                if any(kw in btn_text for kw in _LEAD_MAGNET_TEXT_KWS):
+                    lead_magnet_cta = btn.get_text(" ", strip=True) or btn.get("value", "")
+                    break
+
+        iframes = soup.find_all("iframe")
+        forms   = soup.find_all("form")
+
         def vs(value: Any) -> str:
             if crawl_quality == "failed":
                 return "unable"
@@ -360,6 +401,12 @@ class WebsiteAuditor:
             "word_count":              wc,
             "has_phone":               has_phone,
             "has_email_visible":       has_email,
+            "lead_magnet_url":         lead_magnet_url,
+            "lead_magnet_cta":         lead_magnet_cta,
+            "has_form":                len(forms) > 0,
+            "form_count":              len(forms),
+            "has_iframe":              len(iframes) > 0,
+            "iframe_sources":          [f.get("src", "")[:80] for f in iframes if f.get("src")][:3],
         }
 
     # ─────────────────────────────────────────────────────────────
