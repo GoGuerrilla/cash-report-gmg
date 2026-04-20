@@ -784,7 +784,7 @@ class DocxReportGenerator:
                 _active(li.get("posts_per_week")),
             ))
 
-        if self.config.youtube_url:
+        if self.config.youtube_channel_url:
             snap_rows.append((
                 "YouTube",
                 _fmt_c(yt_metrics.get("subscriber_count")),
@@ -793,7 +793,7 @@ class DocxReportGenerator:
                 _active(yt_metrics.get("posts_per_week")),
             ))
 
-        if self.config.facebook_url:
+        if self.config.facebook_page_url:
             if meta_token:
                 fb = ch_data.get("facebook", {})
                 snap_rows.append((
@@ -807,7 +807,7 @@ class DocxReportGenerator:
             else:
                 snap_rows.append(("Facebook", "—", "—", "—", "Pending API"))
 
-        if self.config.instagram_url:
+        if self.config.instagram_handle:
             if meta_token:
                 ig = ch_data.get("instagram", {})
                 snap_rows.append((

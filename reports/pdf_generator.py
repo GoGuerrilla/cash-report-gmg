@@ -942,7 +942,7 @@ class PDFReportGenerator:
             ))
 
         # YouTube
-        if self.config.youtube_url:
+        if self.config.youtube_channel_url:
             snap_rows.append((
                 "YouTube",
                 _fmt_count(yt_metrics.get("subscriber_count")),
@@ -953,7 +953,7 @@ class PDFReportGenerator:
             ))
 
         # Facebook
-        if self.config.facebook_url:
+        if self.config.facebook_page_url:
             if meta_token:
                 fb = ch_data.get("facebook", {})
                 snap_rows.append((
@@ -970,7 +970,7 @@ class PDFReportGenerator:
                                   _sbadge("gray", "Pending API")))
 
         # Instagram
-        if self.config.instagram_url:
+        if self.config.instagram_handle:
             if meta_token:
                 ig = ch_data.get("instagram", {})
                 snap_rows.append((
