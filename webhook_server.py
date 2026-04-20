@@ -480,6 +480,204 @@ def _safe_audit_timed(label: str, fn, default: dict) -> tuple:
     return result, elapsed
 
 
+def _send_hold_warning_email(config: ClientConfig, contact_email: str, reason: str):
+    """Send admin warning when report is held due to insufficient data."""
+    sg_key     = os.environ.get("SENDGRID_API_KEY", "").strip()
+    from_addr  = (os.environ.get("SENDGRID_FROM_EMAIL")
+                  or os.environ.get("REPORT_EMAIL_FROM", "")).strip()
+    admin_addr = os.environ.get("ADMIN_NOTIFY_EMAIL", "gmg@goguerrilla.xyz").strip()
+    if not sg_key or not from_addr or not admin_addr:
+        log.warning("Hold warning email skipped — missing SendGrid config")
+        return
+    body = (
+        f"⚠️ REPORT HELD — INSUFFICIENT DATA\n"
+        f"{'─' * 40}\n"
+        f"Client  : {config.client_name}\n"
+        f"Website : {config.website_url or '—'}\n"
+        f"Email   : {contact_email or '—'}\n\n"
+        f"Reason: {reason}\n\n"
+        f"Action required: manually verify the client's website and social data, "
+        f"then re-trigger the audit from the admin panel."
+    )
+    try:
+        import urllib.request as _ur, json as _json
+        payload = _json.dumps({
+            "personalizations": [{"to": [{"email": admin_addr}]}],
+            "from":    {"email": from_addr},
+            "subject": f"⚠️ Report Held — Insufficient Data: {config.client_name}",
+            "content": [{"type": "text/plain", "value": body}],
+        }).encode()
+        req = _ur.Request(
+            "https://api.sendgrid.com/v3/mail/send", data=payload,
+            headers={"Authorization": f"Bearer {sg_key}",
+                     "Content-Type": "application/json"}, method="POST")
+        with _ur.urlopen(req, timeout=10) as r:
+            log.info("Hold warning email sent → %s (status %s)", admin_addr, r.status)
+    except Exception as e:
+        log.warning("Hold warning email failed: %s", e)
+
+
+def _data_confidence_check(
+    config: ClientConfig,
+    audit_data: dict,
+    channel_data: dict,
+) -> dict:
+    """
+    Post-Phase-3 data quality gate. Runs before AI synthesis and PDF generation.
+
+    1. Cross-checks contradictions between data sources and corrects them in-place.
+    2. Computes confidence scores: website, social, seo.
+    3. Returns hold_report=True if minimum data threshold not met.
+    4. Logs confidence summary.
+    """
+    li_data = channel_data.get("linkedin", {})
+    yt_data = channel_data.get("youtube", {})
+    fb_data = channel_data.get("facebook", {})
+    ig_data = channel_data.get("instagram", {})
+
+    seo_cs  = audit_data.get("seo", {}).get("crawl_signals", {})
+    seo_vs  = seo_cs.get("validation_states", {})
+    web_hp  = audit_data.get("website", {}).get("homepage", {})
+    web_vs  = web_hp.get("validation_states", {}) if web_hp else {}
+
+    corrections = []
+
+    # ── 1a. Title/H1/meta/schema: GEO may still have stale false flags ───────
+    _signal_issue_patterns = {
+        "title":  ["missing title tag", "title could not be validated",
+                   "no title tag found"],
+        "meta":   ["missing meta description", "no meta description"],
+        "h1":     ["no h1 heading found", "no h1 tag"],
+        "schema": ["no structured data found", "no structured data"],
+    }
+    for sig, patterns in _signal_issue_patterns.items():
+        if seo_vs.get(sig) == "found_rendered":
+            geo_issues = audit_data.get("geo", {}).get("issues", [])
+            cleaned = [i for i in geo_issues
+                       if not any(p in i.lower() for p in patterns)]
+            if len(cleaned) < len(geo_issues):
+                audit_data["geo"]["issues"] = cleaned
+                msg = f"GEO: removed false '{sig}' issue (JS renderer confirmed found_rendered)"
+                corrections.append(msg)
+                log.info("Data confidence correction: %s", msg)
+
+    # ── 1b. YouTube: API confirmed videos but freshness shows Inactive ────────
+    yt_recent = yt_data.get("videos_last_30_days", 0) or 0
+    yt_ppw    = yt_data.get("posts_per_week")
+    yt_days   = yt_data.get("days_since_last_post")
+    if yt_recent > 0:
+        fresh_channels = audit_data.get("freshness", {}).get("channels", {})
+        for yt_key in ("YouTube", "youtube"):
+            if yt_key in fresh_channels:
+                fresh_yt = fresh_channels[yt_key]
+                old_status = fresh_yt.get("status", "")
+                if old_status in ("dead", "unknown", "unknown_inactive", "api_blocked"):
+                    fresh_yt["status"] = "fresh" if yt_recent >= 4 else "recent"
+                    if yt_ppw is not None:
+                        fresh_yt["posts_per_week"] = yt_ppw
+                    if yt_days is not None:
+                        fresh_yt["days_since_last_post"] = yt_days
+                    msg = (f"YouTube freshness corrected: {yt_recent} videos/30d → "
+                           f"was={old_status!r} now={fresh_yt['status']!r}")
+                    corrections.append(msg)
+                    log.info("Data confidence correction: %s", msg)
+
+    # ── 1c. LinkedIn >500 followers but section reports no social presence ─────
+    li_followers = li_data.get("followers", 0) or 0
+    if li_followers > 500:
+        absence_patterns = [
+            "no social presence", "no linkedin", "not active on linkedin",
+            "no social media", "no social channels",
+        ]
+        for section in ("funnel", "icp", "brand"):
+            issues  = audit_data.get(section, {}).get("issues", [])
+            cleaned = [i for i in issues
+                       if not any(p in i.lower() for p in absence_patterns)]
+            if len(cleaned) < len(issues):
+                audit_data[section]["issues"] = cleaned
+                msg = (f"{section}: removed false 'no social' issue "
+                       f"(LinkedIn has {li_followers:,} followers)")
+                corrections.append(msg)
+                log.info("Data confidence correction: %s", msg)
+
+    # ── 2. Confidence scores ──────────────────────────────────────────────────
+    # Website: weighted % of homepage signals verified by JS renderer vs static
+    _signals = ("title", "meta", "h1", "schema", "og", "canonical", "viewport")
+    found_rendered = sum(1 for s in _signals if web_vs.get(s) == "found_rendered")
+    found_static   = sum(1 for s in _signals if web_vs.get(s) == "found")
+    website_conf   = round((found_rendered * 1.0 + found_static * 0.7)
+                           / len(_signals) * 100)
+
+    # Social: % of active platforms with live API/scrape data (not neutral default)
+    live = 0
+    total_platforms = max(len(config.active_social_channels), 1)
+    if "LinkedIn"  in config.active_social_channels and li_data.get("followers") is not None:
+        live += 1
+    if "YouTube"   in config.active_social_channels and yt_data.get("data_source") == "youtube_api_v3":
+        live += 1
+    if "Facebook"  in config.active_social_channels and fb_data.get("data_source") == "meta_graph_api":
+        live += 1
+    if "Instagram" in config.active_social_channels and ig_data.get("data_source") == "meta_graph_api":
+        live += 1
+    social_conf = round(live / total_platforms * 100)
+
+    # SEO: PageSpeed API connected + Playwright render quality
+    seo_method = audit_data.get("seo", {}).get("method", "")
+    if seo_method == "pagespeed+crawl":
+        seo_conf = min(100, 80 + found_rendered * 4)
+    elif seo_cs.get("title"):
+        seo_conf = 60
+    else:
+        seo_conf = 20
+
+    log.info("Data confidence: website=%d%%  social=%d%%  seo=%d%%",
+             website_conf, social_conf, seo_conf)
+    if corrections:
+        log.info("Data confidence corrections applied (%d): %s",
+                 len(corrections), " | ".join(corrections))
+
+    # ── 3. Minimum data threshold ─────────────────────────────────────────────
+    web_failed  = audit_data.get("website", {}).get("pages_crawled", 0) == 0
+    li_missing  = li_data.get("followers") is None
+    yt_missing  = yt_data.get("data_source") != "youtube_api_v3"
+    hold_report = web_failed and li_missing and yt_missing
+    hold_reason = None
+    if hold_report:
+        hold_reason = (
+            "Website scrape returned 0 pages, LinkedIn followers unavailable, "
+            "and YouTube API unavailable. Cannot generate a reliable report."
+        )
+        log.error(
+            "HOLD REPORT — %s (%s): %s",
+            config.client_name, config.website_url, hold_reason
+        )
+
+    # ── 4 & 5. Confidence metadata + low-confidence notes ────────────────────
+    notes = {}
+    if website_conf < 50:
+        notes["website"] = (
+            "Note: Some data points could not be fully verified for this section"
+        )
+    if social_conf < 50:
+        notes["social"] = (
+            "Note: Some data points could not be fully verified for this section"
+        )
+    if seo_conf < 50:
+        notes["seo"] = (
+            "Note: Some data points could not be fully verified for this section"
+        )
+
+    return {
+        "website":     website_conf,
+        "social":      social_conf,
+        "seo":         seo_conf,
+        "corrections": corrections,
+        "hold_report": hold_report,
+        "hold_reason": hold_reason,
+        "notes":       notes,
+    }
+
+
 
 # ══════════════════════════════════════════════════════════════════
 #  CORE AUDIT RUNNER  (generalized — works for any client)
@@ -822,6 +1020,15 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
             }
 
     log.info("TIMING  PHASE3_parallel_auditors  %.2fs", time.time() - phase3_start)
+
+    # ══ Data confidence check (post-Phase-3, pre-AI) ══════════════
+    audit_data["confidence"] = _data_confidence_check(config, audit_data, channel_data)
+    if audit_data["confidence"].get("hold_report"):
+        _send_hold_warning_email(
+            config, contact_email,
+            audit_data["confidence"]["hold_reason"],
+        )
+        return
 
     # ══ Phase 4: AI synthesis → PDF → DOCX → Email ═══════════════
     phase4_start = time.time()
