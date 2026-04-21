@@ -6,7 +6,7 @@ Rules (configurable at top of file)
   IP address  : 1 audit per 7 days per detected public IP
   Email       : 1 audit per 7 days per email address
   Website URL : 1 audit per 30 days per website (protocol/www-normalized)
-  Daily total : max 10 audits per calendar day (system-wide)
+  Daily total : max 25 audits per calendar day (system-wide, override via DAILY_AUDIT_CAP env var)
   Whitelist   : when enabled, only approved emails may run audits
 
 Storage — all three tables live in cash_clients.db
@@ -41,7 +41,7 @@ from typing import Optional, Tuple
 IP_COOLDOWN_DAYS      = 7
 EMAIL_COOLDOWN_DAYS   = 7
 WEBSITE_COOLDOWN_DAYS = 30
-DAILY_MAX_AUDITS      = 10
+DAILY_MAX_AUDITS      = int(os.environ.get("DAILY_AUDIT_CAP", "25"))
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cash_clients.db")
 
