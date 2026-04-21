@@ -764,11 +764,13 @@ class DocxReportGenerator:
         def _fmt_c(v):   return f"{int(v):,}" if v is not None else "—"
         def _fmt_p(v):   return str(v) if v is not None else "—"
         def _fmt_d(v):   return str(v) if v is not None else "—"
-        def _active(ppw, pending=False):
+        def _active(ppw, v30=None, pending=False):
             if pending:     return "Pending API"
-            if ppw is None: return "—"
-            if ppw >= 1:    return "✅ Yes"
-            if ppw > 0:     return "⚠️ Low"
+            if (ppw is not None and ppw >= 1) or (v30 is not None and v30 >= 4):
+                return "✅ Yes"
+            if (ppw is not None and ppw > 0) or (v30 is not None and v30 >= 1):
+                return "⚠️ Low"
+            if ppw is None and v30 is None: return "—"
             return "🔴 Inactive"
 
         snap_rows = []
@@ -790,7 +792,8 @@ class DocxReportGenerator:
                 _fmt_c(yt_metrics.get("subscriber_count")),
                 _fmt_p(yt_metrics.get("posts_per_week")),
                 _fmt_d(yt_metrics.get("days_since_last_post")),
-                _active(yt_metrics.get("posts_per_week")),
+                _active(yt_metrics.get("posts_per_week"),
+                        v30=yt_metrics.get("videos_last_30_days")),
             ))
 
         if self.config.facebook_page_url:

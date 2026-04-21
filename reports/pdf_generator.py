@@ -917,12 +917,12 @@ class PDFReportGenerator:
         def _fmt_days(val):
             return str(val) if val is not None else "—"
 
-        def _active_badge(ppw, days, pending=False):
+        def _active_badge(ppw, days, v30=None, pending=False):
             if pending:
                 return _sbadge("gray", "Pending API")
-            if ppw is not None and ppw >= 1:
+            if (ppw is not None and ppw >= 1) or (v30 is not None and v30 >= 4):
                 return f'{_sdot("g")}{_sbadge("ok", "Yes")}'
-            if ppw is not None and ppw > 0:
+            if (ppw is not None and ppw > 0) or (v30 is not None and v30 >= 1):
                 return f'{_sdot("y")}{_sbadge("warn", "Low")}'
             return f'{_sdot("r")}{_sbadge("critical", "Inactive")}'
 
@@ -949,7 +949,8 @@ class PDFReportGenerator:
                 _fmt_ppw(yt_metrics.get("posts_per_week")),
                 _fmt_days(yt_metrics.get("days_since_last_post")),
                 _active_badge(yt_metrics.get("posts_per_week"),
-                              yt_metrics.get("days_since_last_post")),
+                              yt_metrics.get("days_since_last_post"),
+                              v30=yt_metrics.get("videos_last_30_days")),
             ))
 
         # Facebook
