@@ -458,7 +458,7 @@ class WebsiteAuditor:
         avg_wc = (sum(p.get("word_count", 0) for p in all_pages) / len(all_pages)
                   if all_pages else 0)
         if avg_wc < 300:                                              content -= 30
-        if hp.get("cta_count", 0) < 2:                               content -= 20
+        if hp.get("cta_count", 0) < 2 and hp.get("crawl_quality") != "partial": content -= 20
         # Bonus: about + service pages both found
         page_types = {p.get("page_type") for p in all_pages}
         if "about" in page_types and "service" in page_types:        content += 10

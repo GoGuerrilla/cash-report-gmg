@@ -234,8 +234,8 @@ def _merge_website_data(channel_data: dict, website_audit: dict):
     # Web3 content
     site["web3_content"] = _has("web3", "nft", "blockchain", "crypto", "defi", "dao")
 
-    # Platform detection (from generator/X-Powered-By headers if available)
-    # WebsiteAuditor doesn't capture response headers — leave as None
+    # Platform detected by WebsiteAuditor during homepage parse
+    site["platform"] = (website_audit.get("platform") or "unknown").lower()
 
 
 def run_audit():

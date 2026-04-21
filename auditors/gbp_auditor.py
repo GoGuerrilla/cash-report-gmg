@@ -147,6 +147,9 @@ class GBPAuditor:
             "maps_rating":          None,
             "maps_review_count":    0,
             "maps_phone":           "",
+            # Review count reliability flags (regex extraction is approximate)
+            "review_count_verified": True,   # set to False when extracted by regex
+            "review_count_method":   "none", # "regex_scrape" when extracted
             # Derived
             "nap_consistent":       False,
         }
@@ -324,10 +327,21 @@ class GBPAuditor:
                     if 1.0 <= val <= 5.0:
                         signals["maps_rating"] = val
 
-                # Try review count
-                m2 = re.search(r",(\d{2,5}),", ctx)
-                if m2:
-                    signals["maps_review_count"] = int(m2.group(1))
+                # Try review count — "(N)" parenthesized format is most reliable in Maps JS
+                m_paren = re.search(r"\((\d{1,5})\)", ctx)
+                if m_paren and int(m_paren.group(1)) >= 2:
+                    signals["maps_review_count"] = int(m_paren.group(1))
+                    signals["review_count_verified"] = False
+                    signals["review_count_method"]   = "regex_scrape"
+                else:
+                    # Fallback: comma-bounded number within 300 chars of the rating,
+                    # max 4 digits to avoid matching ZIP codes or CSS pixel values
+                    rating_end = m.end() if m else 0
+                    m2 = re.search(r",(\d{2,4}),", ctx[rating_end: rating_end + 300])
+                    if m2:
+                        signals["maps_review_count"]  = int(m2.group(1))
+                        signals["review_count_verified"] = False
+                        signals["review_count_method"]   = "regex_scrape"
 
             # Phone from Maps HTML
             phones = _PHONE_RE.findall(html)
@@ -406,9 +420,11 @@ class GBPAuditor:
             "business_name":      self.name,
             "address":            effective_address,
             "phone":              effective_phone,
-            "rating":             s["maps_rating"],
-            "review_count":       s["maps_review_count"],
-            "photo_count":        0,           # requires paid API
+            "rating":                s["maps_rating"],
+            "review_count":          s["maps_review_count"],
+            "review_count_verified": s["review_count_verified"],
+            "review_count_method":   s["review_count_method"],
+            "photo_count":           0,        # requires paid API
             "hours_listed":       False,        # requires paid API
             "is_likely_verified": listing_confirmed and s["schema_quality"] >= 1,
             "website_listed":     s["maps_link_url"],
@@ -539,9 +555,11 @@ class GBPAuditor:
             "business_name":      self.name,
             "address":            "",
             "phone":              "",
-            "rating":             None,
-            "review_count":       0,
-            "photo_count":        0,
+            "rating":                None,
+            "review_count":          0,
+            "review_count_verified": True,
+            "review_count_method":   "none",
+            "photo_count":           0,
             "hours_listed":       False,
             "is_likely_verified": False,
             "website_listed":     "",

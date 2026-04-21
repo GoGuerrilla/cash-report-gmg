@@ -973,7 +973,9 @@ class DocxReportGenerator:
                 ("Address",            gbp.get("address", "—")),
                 ("Phone",              gbp.get("phone") or "—"),
                 ("Rating",             rating_str),
-                ("Total Reviews",      str(gbp.get("review_count", 0))),
+                ("Total Reviews",      (f"~{gbp['review_count']} (estimated)"
+                                       if gbp.get("review_count") and not gbp.get("review_count_verified", True)
+                                       else str(gbp.get("review_count", 0)))),
                 ("Photos on Profile",  str(gbp.get("photo_count", 0))),
                 ("Hours Listed",       "✅ Yes" if gbp.get("hours_listed") else "❌ No"),
                 ("Profile Status",     gbp.get("business_status", "—")),

@@ -1289,7 +1289,10 @@ class PDFReportGenerator:
         gbp_name     = _h(gbp.get("business_name", self.config.client_name))
         gbp_address  = _h(gbp.get("address") or "—")
         gbp_phone    = _h(str(gbp.get("phone") or "—"))
-        gbp_reviews  = gbp.get("review_count", 0) or 0
+        _gbp_rc      = gbp.get("review_count", 0) or 0
+        gbp_reviews  = (f"~{_gbp_rc} (estimated)"
+                        if _gbp_rc and not gbp.get("review_count_verified", True)
+                        else str(_gbp_rc) if _gbp_rc else "0")
         gbp_hrs      = gbp.get("hours_listed", False)
         gbp_verified = gbp.get("is_likely_verified", gbp.get("found", False))
         gbp_nap      = gbp.get("nap_consistent", False)
