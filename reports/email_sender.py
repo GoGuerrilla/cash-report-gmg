@@ -284,19 +284,35 @@ def send_report(
         body = _body_text(client_name, overall_score, overall_grade, attachment_label)
 
     # ── Send ──────────────────────────────────────────────────────
+    def _send_team_copy(ok: bool) -> bool:
+        """After a successful client send, fire a beta copy to GMG_TEAM_EMAIL."""
+        if not ok:
+            return False
+        team_addr = os.environ.get("GMG_TEAM_EMAIL", "gmg@goguerrilla.xyz").strip()
+        if team_addr and team_addr != to_addr:
+            team_subject = f"[BETA COPY] {subject}"
+            log.info("Team copy: sending to %s", team_addr)
+            if sg_key:
+                _send_sendgrid(sg_key, from_addr, team_addr, team_subject, body,
+                               report_path, teaser_path)
+            elif password:
+                _send_smtp(from_addr, password, team_addr, team_subject, body,
+                           smtp_host, smtp_port, report_path, teaser_path)
+        return True
+
     if sg_key:
         log.info("Email: using SendGrid")
         ok = _send_sendgrid(sg_key, from_addr, to_addr, subject, body,
                             report_path, teaser_path)
         if ok:
-            return True
+            return _send_team_copy(ok)
         # SendGrid failed — attempt SMTP fallback if configured
         if password:
             log.warning("SendGrid failed — falling back to SMTP (%s:%d)", smtp_host, smtp_port)
             smtp_ok = _send_smtp(from_addr, password, to_addr, subject, body,
                                  smtp_host, smtp_port, report_path, teaser_path)
             if smtp_ok:
-                return True
+                return _send_team_copy(smtp_ok)
         log.error("EMAIL DELIVERY FAILED for %s — SendGrid returned error AND no SMTP fallback succeeded. "
                   "Check SENDGRID_API_KEY validity and REPORT_EMAIL_PASSWORD.", to_addr)
         return False
@@ -308,7 +324,7 @@ def send_report(
         if not ok:
             log.error("EMAIL DELIVERY FAILED for %s — SMTP authentication or send error. "
                       "Verify REPORT_EMAIL_PASSWORD is a valid Gmail App Password.", to_addr)
-        return ok
+        return _send_team_copy(ok) if ok else False
 
     log.error("EMAIL DELIVERY FAILED — no delivery method configured. "
               "Set SENDGRID_API_KEY (recommended) or REPORT_EMAIL_PASSWORD.")
