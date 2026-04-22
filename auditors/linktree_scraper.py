@@ -29,6 +29,7 @@ PLATFORM_PATTERNS = {
     "YouTube":    r"youtube\.com/(?:@|channel/|c/)?([^/?&#\"']+)",
     "Facebook":   r"facebook\.com/([^/?&#\"']+)",
     "TikTok":     r"tiktok\.com/@([^/?&#\"']+)",
+    "Twitter":    r"(?:twitter|x)\.com/([^/?&#\"']+)",
     "Discord":    r"discord\.(?:gg|com/invite)/([^/?&#\"']+)",
     "Pinterest":  r"pinterest\.com/([^/?&#\"']+)",
     "Spotify":    r"open\.spotify\.com/([^/?&#\"']+)",
@@ -42,6 +43,8 @@ _LINKTYPE_MAP = {
     "YOUTUBE":           "YouTube",
     "FACEBOOK":          "Facebook",
     "TIKTOK":            "TikTok",
+    "TWITTER":           "Twitter",
+    "X":                 "Twitter",
     "DISCORD":           "Discord",
     "LINKEDIN":          "LinkedIn",
     "PINTEREST":         "Pinterest",
@@ -169,7 +172,7 @@ class LinktreeScraper:
 
     def _parse_next_data(self, html: str) -> Dict[str, Any]:
         match = re.search(
-            r'<script\s+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>',
+            r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>',
             html, re.DOTALL
         )
         if not match:
