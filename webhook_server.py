@@ -814,7 +814,8 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
             log.info("TIMING  youtube_api             %.2fs", time.time() - _t)
             if yt.get("data_source") == "youtube_api_v3":
                 for key in ("posts_per_week", "days_since_last_post", "is_active",
-                            "subscriber_count", "total_video_count", "videos_last_30_days"):
+                            "subscriber_count", "total_video_count", "videos_last_30_days",
+                            "avg_views_per_video", "total_view_count", "data_source"):
                     if yt.get(key) is not None:
                         channel_data["youtube"][key] = yt[key]
                 # Alias for FunnelAuditor compatibility
