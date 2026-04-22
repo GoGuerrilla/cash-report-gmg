@@ -58,12 +58,14 @@ Output
   Plus audit-level lists: issues[], strengths[], recommendations[]
 """
 import json
+import logging as _logging
 import urllib.request
 import urllib.parse
 import urllib.error
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List
 
+_log = _logging.getLogger(__name__)
 
 GRAPH_VERSION = "v19.0"
 BASE_URL      = f"https://graph.facebook.com/{GRAPH_VERSION}"
@@ -86,6 +88,48 @@ class MetaAuditor:
         self._app_token       = f"{app_id}|{app_secret}"
 
     # ══════════════════════════════════════════════════════════
+    #  Token exchange
+    # ══════════════════════════════════════════════════════════
+
+    def _exchange_for_long_lived_token(self) -> None:
+        """
+        Exchange a short-lived Page Access Token for a 60-day long-lived token.
+        Mutates self.page_token in-place on success. Never raises.
+        Safe to call with an already-long-lived token — Meta returns the
+        existing token with remaining TTL, so self.page_token is refreshed.
+        """
+        if not (self.page_token and self.app_id and self.app_secret):
+            return
+        try:
+            params = urllib.parse.urlencode({
+                "grant_type":        "fb_exchange_token",
+                "client_id":         self.app_id,
+                "client_secret":     self.app_secret,
+                "fb_exchange_token": self.page_token,
+            })
+            url = "https://graph.facebook.com/oauth/access_token?" + params
+            req = urllib.request.Request(url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            if "error" in body:
+                _log.warning("Meta: token exchange error — %s (using original token)",
+                             body["error"].get("message", "unknown"))
+                return
+            new_token  = body.get("access_token", "")
+            expires_in = body.get("expires_in")   # seconds, typically ~5,183,944 (~60 days)
+            if not new_token:
+                return
+            self.page_token = new_token
+            if expires_in:
+                expiry = datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
+                _log.info("Meta: long-lived token active — expires %s (%d days)",
+                          expiry.strftime("%Y-%m-%d"), int(expires_in) // 86400)
+            else:
+                _log.info("Meta: long-lived token active (no expiry in response)")
+        except Exception as exc:
+            _log.warning("Meta: token exchange failed — using original token (%s)", exc)
+
+    # ══════════════════════════════════════════════════════════
     #  Public entry point
     # ══════════════════════════════════════════════════════════
 
@@ -94,6 +138,7 @@ class MetaAuditor:
         Run all available checks and return a unified result dict.
         Never raises — every sub-call is individually guarded.
         """
+        self._exchange_for_long_lived_token()
         result = {
             "facebook":       self._empty_platform("Facebook"),
             "instagram":      self._empty_platform("Instagram"),
