@@ -718,6 +718,29 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
         _t = time.time()
         linktree_data = LinktreeScraper(config.linktree_url).scrape()
         log.info("TIMING  linktree_scrape         %.2fs", time.time() - _t)
+        log.info("Linktree scrape_status=%s  platforms=%s",
+                 linktree_data.get("scrape_status"),
+                 linktree_data.get("platforms_found"))
+        if linktree_data.get("data_verified") and \
+           linktree_data.get("classified_links"):
+            from intake.questionnaire import _classified_to_platforms
+            plat_data = _classified_to_platforms(
+                linktree_data["classified_links"])
+            if plat_data.get("linkedin_url"):
+                config.linkedin_url = plat_data["linkedin_url"]
+            if plat_data.get("instagram_handle"):
+                config.instagram_handle = plat_data["instagram_handle"]
+            if plat_data.get("youtube_channel_url"):
+                config.youtube_channel_url = plat_data["youtube_channel_url"]
+            if plat_data.get("facebook_page_url"):
+                config.facebook_page_url = plat_data["facebook_page_url"]
+            if plat_data.get("tiktok_handle"):
+                config.tiktok_handle = plat_data["tiktok_handle"]
+            if plat_data.get("discord_url"):
+                config.discord_url = plat_data["discord_url"]
+            if not config.website_url:
+                config.website_url = plat_data.get(
+                    "_website_from_linktree", "") or config.website_url
     elif config.website_url:
         log.info("Scraping website socials: %s", config.website_url)
         _t = time.time()
