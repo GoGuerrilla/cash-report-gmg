@@ -1883,6 +1883,44 @@ def admin_trigger():
     return redirect("/admin?" + urlencode({"flash": msg, "ft": "ok"}))
 
 
+@app.route("/admin/clear-rate-limit", methods=["POST"])
+def admin_clear_rate_limit():
+    # Auth
+    if request.headers.get("X-Admin-Password", "") != os.environ.get("ADMIN_PASSWORD", ""):
+        return jsonify({"error": "unauthorized"}), 403
+
+    body        = request.get_json(force=True, silent=True) or {}
+    email       = (body.get("email") or "").strip().lower()
+    website_url = (body.get("website_url") or "").strip().lower()
+
+    if not email and not website_url:
+        return jsonify({"error": "provide at least one of: email, website_url"}), 400
+
+    try:
+        from intake.rate_limiter import _connect
+        deleted = 0
+        with _connect() as conn:
+            if email:
+                cur = conn.execute(
+                    "DELETE FROM rate_limit_log WHERE LOWER(email) = ?", (email,)
+                )
+                deleted += cur.rowcount
+            if website_url:
+                cur = conn.execute(
+                    "DELETE FROM rate_limit_log WHERE LOWER(website_url) LIKE ?",
+                    (f"%{website_url}%",)
+                )
+                deleted += cur.rowcount
+        return jsonify({
+            "success":     True,
+            "cleared":     deleted,
+            "email":       email or None,
+            "website_url": website_url or None,
+        })
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 # ══════════════════════════════════════════════════════════════════
 #  REJECTION EMAIL HELPER
 # ══════════════════════════════════════════════════════════════════
