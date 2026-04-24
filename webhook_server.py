@@ -1712,15 +1712,15 @@ a.ul:hover{text-decoration:underline}
     <form method="POST" action="/admin/trigger" class="trigger-form">
       <div>
         <label>Business Name</label>
-        <input type="text" name="business_name" placeholder="Acme Corp" required>
+        <input type="text" name="business_name" placeholder="Acme Corp">
       </div>
       <div>
         <label>Website URL</label>
-        <input type="url" name="website_url" placeholder="https://example.com" required>
+        <input type="text" name="website_url" placeholder="https://example.com">
       </div>
       <div>
         <label>Contact Email</label>
-        <input type="email" name="contact_email" placeholder="client@example.com" required>
+        <input type="text" name="contact_email" placeholder="client@example.com">
       </div>
       <div>
         <button type="submit" class="btn">&#9654; Run Audit</button>
@@ -1844,8 +1844,8 @@ def admin_trigger():
     website_url   = _normalise_url(request.form.get("website_url", ""))
     contact_email = request.form.get("contact_email", "").strip()
 
-    if not website_url or not contact_email:
-        msg = "Website URL and contact email are required."
+    if not website_url:
+        msg = "Website URL is required to run an audit."
         return redirect("/admin?" + urlencode({"flash": msg, "ft": "err"}))
 
     if not business_name and website_url:
