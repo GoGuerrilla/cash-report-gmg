@@ -798,7 +798,20 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
                 if li_data.get(key) is not None:
                     channel_data["linkedin"][key] = li_data[key]
             channel_data["linkedin"]["is_active"] = True
+            channel_data["linkedin"]["data_source"] = src
             log.info("LinkedIn: followers=%s ppw=%s", li_data.get("followers"), li_data.get("posts_per_week"))
+        elif src != "scrape_failed":
+            # proxycurl, linkedin_reachable, linkedin_reachable_fallback —
+            # page was reachable; copy whatever data is available and preserve
+            # data_source so PDF/DOCX generators can render the fallback narrative.
+            for key in ("followers", "company_size", "founded_year", "employee_count"):
+                if li_data.get(key) is not None:
+                    channel_data["linkedin"][key] = li_data[key]
+            # fallback = page existed but activity unverifiable; None matches the
+            # "unknown" convention and avoids a false-positive in freshness scoring.
+            channel_data["linkedin"]["is_active"] = None if src == "linkedin_reachable_fallback" else True
+            channel_data["linkedin"]["data_source"] = src
+            log.info("LinkedIn scrape returned source=%s followers=%s", src, li_data.get("followers"))
         else:
             log.info("LinkedIn scrape returned source=%s", src)
 

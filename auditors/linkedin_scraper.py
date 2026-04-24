@@ -47,10 +47,11 @@ _USER_AGENTS = [
     "LinkedInBot/1.0 (compatible; Mozilla/5.0; Apache-HttpClient)",
 ]
 
-_ISO_RE      = re.compile(r'"datePublished"\s*:\s*"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})')
-_HEADLINE_RE = re.compile(r'"headline"\s*:\s*"([^"]{10,120})"')
-_FOLLOWER_RE = re.compile(r'([\d,]+)\s*follower', re.I)
-_TIMEOUT     = 15
+_ISO_RE          = re.compile(r'"datePublished"\s*:\s*"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})')
+_HEADLINE_RE     = re.compile(r'"headline"\s*:\s*"([^"]{10,120})"')
+_FOLLOWER_RE     = re.compile(r'([\d,]+)\s*follower', re.I)
+_LI_COMPANY_RE   = re.compile(r'(https?://(?:www\.)?linkedin\.com/company/[^/?#]+)')
+_TIMEOUT         = 15
 
 _log = logging.getLogger(__name__)
 
@@ -62,6 +63,16 @@ _PROXYCURL_FALLBACK: Dict[str, Any] = {
     "founded_year":   None,
     "employee_count": None,
 }
+
+
+def _normalize_linkedin_url(url: str) -> str:
+    """Strip /admin/, /feed/, query strings, fragments — return canonical company URL."""
+    if not url:
+        return url
+    m = _LI_COMPANY_RE.match(url)
+    if not m:
+        return url
+    return m.group(1) + "/"
 
 
 def _proxycurl_enrich(linkedin_url: str, result: Dict[str, Any]) -> None:
@@ -76,7 +87,7 @@ def _proxycurl_enrich(linkedin_url: str, result: Dict[str, Any]) -> None:
         result["data_source"] = "linkedin_reachable_fallback"
         return
 
-    params = urllib.parse.urlencode({"url": linkedin_url})
+    params = urllib.parse.urlencode({"url": _normalize_linkedin_url(linkedin_url)})
     req = urllib.request.Request(
         f"{_PROXYCURL_URL}?{params}",
         headers={"Authorization": f"Bearer {api_key}"},
@@ -194,7 +205,7 @@ def scrape(linkedin_url: str) -> Dict[str, Any]:
     Main entry point. Accepts a LinkedIn company page URL.
     Returns a dict compatible with preloaded_channel_data["linkedin"].
     """
-    base = linkedin_url.rstrip("/")
+    base = _normalize_linkedin_url(linkedin_url).rstrip("/")
     result: Dict[str, Any] = {
         "followers":            None,
         "posts_per_week":       None,
