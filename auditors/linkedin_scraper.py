@@ -19,11 +19,15 @@ Returns a dict compatible with preloaded_channel_data["linkedin"]:
     "data_source":          str,
   }
 """
+import logging
+import os
 import re
+import json
 import random
 import time
 import urllib.request
 import urllib.error
+import urllib.parse
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 
@@ -47,6 +51,65 @@ _ISO_RE      = re.compile(r'"datePublished"\s*:\s*"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2
 _HEADLINE_RE = re.compile(r'"headline"\s*:\s*"([^"]{10,120})"')
 _FOLLOWER_RE = re.compile(r'([\d,]+)\s*follower', re.I)
 _TIMEOUT     = 15
+
+_log = logging.getLogger(__name__)
+
+_PROXYCURL_URL = "https://nubela.co/proxycurl/api/v2/linkedin/company"
+
+_PROXYCURL_FALLBACK: Dict[str, Any] = {
+    "followers":      None,
+    "company_size":   None,
+    "founded_year":   None,
+    "employee_count": None,
+}
+
+
+def _proxycurl_enrich(linkedin_url: str, result: Dict[str, Any]) -> None:
+    """
+    Backfills follower_count, company_size, founded_year, employee_count via
+    Proxycurl when the HTML scrape loaded the page but couldn't find followers.
+    Mutates `result` in-place. Falls back to None values + flag on any failure.
+    """
+    api_key = os.environ.get("PROXYCURL_API_KEY", "")
+    if not api_key:
+        result.update(_PROXYCURL_FALLBACK)
+        result["data_source"] = "linkedin_reachable_fallback"
+        return
+
+    params = urllib.parse.urlencode({"url": linkedin_url})
+    req = urllib.request.Request(
+        f"{_PROXYCURL_URL}?{params}",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+
+        follower_count = data.get("follower_count")
+        company_size   = data.get("company_size")
+        founded_year   = data.get("founded_year")
+        employee_count = data.get("employee_count")
+
+        if follower_count is not None:
+            result["followers"] = int(follower_count)
+
+        if isinstance(company_size, dict):
+            s, e = company_size.get("start"), company_size.get("end")
+            result["company_size"] = f"{s}–{e}" if s and e else str(s or e or "")
+        elif company_size:
+            result["company_size"] = str(company_size)
+
+        if founded_year is not None:
+            result["founded_year"] = int(founded_year)
+
+        if employee_count is not None:
+            result["employee_count"] = int(employee_count)
+
+        result["data_source"] = "proxycurl"
+
+    except Exception:
+        result.update(_PROXYCURL_FALLBACK)
+        result["data_source"] = "linkedin_reachable_fallback"
 
 
 def _fetch(url: str) -> Optional[str]:
@@ -144,6 +207,9 @@ def scrape(linkedin_url: str) -> Dict[str, Any]:
         "post_themes":          [],
         "services_listed":      [],
         "engagement_level":     None,
+        "company_size":         None,
+        "founded_year":         None,
+        "employee_count":       None,
     }
 
     # Try overview page (embeds the most posts in JSON-LD)
@@ -179,4 +245,13 @@ def scrape(linkedin_url: str) -> Dict[str, Any]:
     if headlines:
         result["recent_headlines"] = headlines
 
+    if result["data_source"] == "linkedin_reachable" and result["followers"] is None:
+        _proxycurl_enrich(base, result)
+
+    _log.info(
+        "linkedin_scrape_result url=%s data_source=%s followers=%s",
+        base,
+        result.get("data_source"),
+        result.get("followers"),
+    )
     return result

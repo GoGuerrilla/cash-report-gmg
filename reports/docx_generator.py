@@ -775,15 +775,21 @@ class DocxReportGenerator:
 
         snap_rows = []
 
+        li_fallback = False
         if self.config.linkedin_url:
             li = ch_data.get("linkedin", {})
+            li_fallback = li.get("data_source") == "linkedin_reachable_fallback"
+            _li_days_val = (li.get("days_since_last_post")
+                            or fresh_ch.get("LinkedIn", {}).get("days_since_last_post"))
             snap_rows.append((
                 "LinkedIn",
-                _fmt_c(li.get("followers")),
-                _fmt_p(li.get("posts_per_week")),
-                _fmt_d(li.get("days_since_last_post")
-                       or fresh_ch.get("LinkedIn", {}).get("days_since_last_post")),
-                _active(li.get("posts_per_week")),
+                "—¹" if li_fallback else _fmt_c(li.get("followers")),
+                "—¹" if (li_fallback and li.get("posts_per_week") is None)
+                     else _fmt_p(li.get("posts_per_week")),
+                "—¹" if (li_fallback and _li_days_val is None)
+                     else _fmt_d(_li_days_val),
+                "✓ Confirmed · See detail below" if li_fallback
+                else _active(li.get("posts_per_week")),
             ))
 
         if self.config.youtube_channel_url:
@@ -832,11 +838,66 @@ class DocxReportGenerator:
                 snap_rows,
                 col_widths=[Inches(1.4), Inches(1.4), Inches(0.9), Inches(1.1), Inches(1.2)],
             )
+            if li_fallback:
+                fn = doc.add_paragraph()
+                fn.paragraph_format.space_before = Pt(0)
+                fn.paragraph_format.space_after  = Pt(8)
+                rfn = fn.add_run("¹See LinkedIn Presence section for details")
+                rfn.font.name = "Calibri"; rfn.font.size = Pt(8)
+                rfn.italic = True
+                rfn.font.color.rgb = _rgb(MGRAY)
+
+        if li_fallback:
+            self._build_linkedin_fallback(doc)
 
         cr = self.ai.get("channel_recommendation", "")
         if cr:
             self._subsection(doc, "Channel Strategy")
             self._callout(doc, cr, NAVY)
+
+    def _build_linkedin_fallback(self, doc: Document):
+        self._subsection(doc, "LinkedIn Presence")
+        self._callout(doc, "✓ Profile verified and publicly reachable", GREEN)
+        p1 = doc.add_paragraph()
+        p1.paragraph_format.space_before = Pt(4)
+        p1.paragraph_format.space_after  = Pt(8)
+        r1 = p1.add_run(
+            "Follower and engagement metrics temporarily unavailable. LinkedIn has tightened "
+            "data access across all third-party analytics tools. We're migrating to an upgraded "
+            "data partner, and full metrics will appear in your next C.A.S.H. Report."
+        )
+        r1.font.name = "Calibri"; r1.font.size = Pt(10)
+        r1.font.color.rgb = _rgb(DGRAY)
+        p2 = doc.add_paragraph()
+        p2.paragraph_format.space_before = Pt(0)
+        p2.paragraph_format.space_after  = Pt(8)
+        r2 = p2.add_run(
+            "LinkedIn remains the highest-trust platform for financial advisers and B2B "
+            "professionals. Even without follower counts, consistent posting on thought "
+            "leadership, client stories, and market commentary compounds authority over time. "
+            "Aim for 2–3 posts/week minimum to stay visible to your network."
+        )
+        r2.font.name = "Calibri"; r2.font.size = Pt(10)
+        r2.font.color.rgb = _rgb(DGRAY)
+        tbl = doc.add_table(rows=1, cols=1)
+        tbl.style = "Table Grid"
+        tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+        c = tbl.rows[0].cells[0]
+        _shade_cell(c, LGRAY)
+        c.width = Inches(6.5)
+        p3 = c.paragraphs[0]
+        p3.paragraph_format.space_before = Pt(6)
+        p3.paragraph_format.space_after  = Pt(6)
+        p3.paragraph_format.left_indent  = Pt(6)
+        r3h = p3.add_run("Next report will include:  ")
+        r3h.bold = True; r3h.font.name = "Calibri"; r3h.font.size = Pt(9)
+        r3h.font.color.rgb = _rgb(NAVY)
+        r3b = p3.add_run(
+            "follower count, monthly follower growth, top-performing post, engagement rate."
+        )
+        r3b.font.name = "Calibri"; r3b.font.size = Pt(9)
+        r3b.font.color.rgb = _rgb(DGRAY)
+        doc.add_paragraph()
 
     # ── Section S: Sales ───────────────────────────────────────
 
