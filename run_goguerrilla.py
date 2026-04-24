@@ -374,7 +374,8 @@ def run_audit():
         # Merge into preloaded channel data so freshness auditor picks it up
         channel_data["linkedin"].update({
             k: v for k, v in li_data.items()
-            if k in ("followers", "posts_per_week", "days_since_last_post", "is_active")
+            if k in ("followers", "posts_per_week", "days_since_last_post", "is_active",
+                     "data_source")
             and v is not None
         })
 
