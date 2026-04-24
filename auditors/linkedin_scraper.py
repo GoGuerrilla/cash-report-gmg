@@ -55,14 +55,10 @@ _TIMEOUT         = 15
 
 _log = logging.getLogger(__name__)
 
-_PROXYCURL_URL = "https://nubela.co/proxycurl/api/v2/linkedin/company"
-
-_PROXYCURL_FALLBACK: Dict[str, Any] = {
-    "followers":      None,
-    "company_size":   None,
-    "founded_year":   None,
-    "employee_count": None,
-}
+_APIFY_ACTOR_URL = (
+    "https://api.apify.com/v2/acts/harvestapi~linkedin-company-posts"
+    "/run-sync-get-dataset-items"
+)
 
 
 def _normalize_linkedin_url(url: str) -> str:
@@ -75,51 +71,84 @@ def _normalize_linkedin_url(url: str) -> str:
     return m.group(1) + "/"
 
 
-def _proxycurl_enrich(linkedin_url: str, result: Dict[str, Any]) -> None:
+def _apify_enrich(linkedin_url: str, result: Dict[str, Any]) -> None:
     """
-    Backfills follower_count, company_size, founded_year, employee_count via
-    Proxycurl when the HTML scrape loaded the page but couldn't find followers.
-    Mutates `result` in-place. Falls back to None values + flag on any failure.
+    Fetches post data via Apify harvestapi/linkedin-company-posts (sync run, max 10 posts).
+    Computes post cadence and engagement from returned metadata.
+    Follower count is not available from this actor and remains None.
+    Mutates `result` in-place.
     """
-    api_key = os.environ.get("PROXYCURL_API_KEY", "")
+    api_key = os.environ.get("APIFY_API_KEY", "")
     if not api_key:
-        result.update(_PROXYCURL_FALLBACK)
         result["data_source"] = "linkedin_reachable_fallback"
         return
 
-    params = urllib.parse.urlencode({"url": _normalize_linkedin_url(linkedin_url)})
+    payload = json.dumps({
+        "url":   _normalize_linkedin_url(linkedin_url),
+        "count": 10,
+    }).encode("utf-8")
     req = urllib.request.Request(
-        f"{_PROXYCURL_URL}?{params}",
-        headers={"Authorization": f"Bearer {api_key}"},
+        f"{_APIFY_ACTOR_URL}?token={api_key}",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            posts = json.loads(resp.read().decode("utf-8"))
 
-        follower_count = data.get("follower_count")
-        company_size   = data.get("company_size")
-        founded_year   = data.get("founded_year")
-        employee_count = data.get("employee_count")
+        if not isinstance(posts, list) or not posts:
+            result["data_source"] = "linkedin_reachable_fallback"
+            return
 
-        if follower_count is not None:
-            result["followers"] = int(follower_count)
+        dates: List[datetime] = []
+        headlines: List[str]  = []
+        total_likes = total_comments = total_reactions = 0
 
-        if isinstance(company_size, dict):
-            s, e = company_size.get("start"), company_size.get("end")
-            result["company_size"] = f"{s}–{e}" if s and e else str(s or e or "")
-        elif company_size:
-            result["company_size"] = str(company_size)
+        for post in posts:
+            pub = post.get("pubDate") or post.get("publishedAt") or post.get("date")
+            if pub:
+                try:
+                    dt = datetime.fromisoformat(
+                        str(pub).replace("Z", "+00:00")
+                    ).replace(tzinfo=timezone.utc)
+                    dates.append(dt)
+                except ValueError:
+                    pass
 
-        if founded_year is not None:
-            result["founded_year"] = int(founded_year)
+            total_likes     += int(post.get("likes",     0) or 0)
+            total_comments  += int(post.get("comments",  0) or 0)
+            total_reactions += int(post.get("reactions", 0) or 0)
 
-        if employee_count is not None:
-            result["employee_count"] = int(employee_count)
+            text = post.get("text") or post.get("content") or post.get("title") or ""
+            if len(text) >= 10:
+                headlines.append(text[:120])
 
-        result["data_source"] = "proxycurl"
+        dates.sort(reverse=True)
+        now = datetime.now(timezone.utc)
 
-    except Exception:
-        result.update(_PROXYCURL_FALLBACK)
+        if dates:
+            days_since = (now - dates[0]).days
+            result.update({
+                "days_since_last_post": days_since,
+                "posts_per_week":       _posts_per_week(dates),
+                "is_active":            days_since <= 30,
+                "post_dates":           [d.strftime("%Y-%m-%d") for d in dates],
+            })
+
+        if headlines:
+            result["recent_headlines"] = headlines[:5]
+
+        n = len(posts)
+        if n:
+            result["avg_likes"]     = round(total_likes     / n, 1)
+            result["avg_comments"]  = round(total_comments  / n, 1)
+            result["avg_reactions"] = round(total_reactions / n, 1)
+
+        result["data_source"] = "apify_linkedin_posts"
+
+    except Exception as exc:
+        _log.warning("apify_enrich failed: %s", exc)
         result["data_source"] = "linkedin_reachable_fallback"
 
 
@@ -256,8 +285,8 @@ def scrape(linkedin_url: str) -> Dict[str, Any]:
     if headlines:
         result["recent_headlines"] = headlines
 
-    if result["data_source"] == "linkedin_reachable" and result["followers"] is None:
-        _proxycurl_enrich(base, result)
+    if result["data_source"] == "linkedin_reachable":
+        _apify_enrich(base, result)
 
     _log.info(
         "linkedin_scrape_result url=%s data_source=%s followers=%s",
