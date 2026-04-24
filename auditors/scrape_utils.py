@@ -22,8 +22,9 @@ JSON-LD formats handled by extract_schema()
 
 Platform-specific notes
 ────────────────────────
-  Wix         — SSR HTML; all meta tags and schema in static source; H1/H2 present.
-               May require Chrome UA to pass Cloudflare checks.
+  Wix         — Client-side rendered SPA (same treatment as react/vue). Raw HTML is a
+               JS shell; use render_page() for real DOM content. /blog-feed.xml
+               provides RSS ground truth for blog post count/dates.
   Squarespace — SSR HTML; OG tags sometimes use name= instead of property=.
                Googlebot fallback usually passes.
   Shopify     — SSR HTML; schema frequently in @graph format via Organization +
@@ -34,8 +35,11 @@ Platform-specific notes
 """
 
 import json
+import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple
+
+_log = logging.getLogger(__name__)
 
 try:
     import requests
@@ -248,11 +252,10 @@ def detect_platform(soup: Optional[Any], html: str = "") -> str:
       'unknown'
 
     Scraping behaviour notes:
-      Wix / Squarespace / Shopify / WordPress / Webflow / Next.js — all use
-      server-side rendering; H1, meta tags, and schema appear in raw HTML.
-      react / vue — pure client-side SPAs; raw HTML typically contains only
-      a shell div; missing technical signals should be Unable-to-validate,
-      not scored as failures.
+      Squarespace / Shopify / WordPress / Webflow / Next.js — server-side
+      rendering; H1, meta tags, and schema appear in raw HTML.
+      wix / react / vue — client-side SPAs; raw HTML is a JS shell; missing
+      technical signals should be Unable-to-validate, not scored as failures.
     """
     html_l = html.lower() if html else ""
 
@@ -262,6 +265,8 @@ def detect_platform(soup: Optional[Any], html: str = "") -> str:
         or "wix.com/_api" in html_l
         or "wix-code" in html_l
         or "wix.viewer" in html_l
+        or "<!-- wix:site" in html_l
+        or (soup and soup.find("meta", attrs={"name": "wix-site-id"}))
     ):
         return "wix"
 
@@ -682,7 +687,7 @@ def get_word_count(soup: Optional[Any]) -> int:
 
 def render_page(
     url: str,
-    timeout_ms: int = 15_000,
+    timeout_ms: int = 20_000,
 ) -> Tuple[Optional[str], str]:
     """
     Render a page with a headless Chromium browser (Playwright) and return
@@ -721,3 +726,63 @@ def render_page(
         return html, "ok"
     except Exception as exc:
         return None, str(exc)
+
+
+def fetch_wix_blog_rss(base_url: str) -> Optional[List[Dict[str, Any]]]:
+    """
+    Fetch /blog-feed.xml on a Wix site and parse as RSS.
+
+    Returns:
+      List[Dict] — feed reachable; dicts have keys title, published, url.
+                   An empty list means the blog feature is enabled but has no posts.
+      None       — feed unreachable (404 = blog not enabled; other = fetch/parse
+                   failure). The specific reason is logged at INFO/WARNING level.
+
+    Never raises. Uses stdlib xml.etree only — no new dependencies.
+    """
+    import xml.etree.ElementTree as ET
+
+    feed_url = base_url.rstrip("/") + "/blog-feed.xml"
+    html, status = fetch_url(feed_url)
+
+    if status == 404:
+        _log.info("Wix blog RSS 404 — blog not enabled: %s", feed_url)
+        return None
+    if not html or status not in (200,):
+        _log.info("Wix blog RSS unavailable: %s (status=%s)", feed_url, status)
+        return None
+
+    try:
+        root = ET.fromstring(html)
+    except ET.ParseError as exc:
+        _log.warning("Wix blog RSS parse error: %s — %s", feed_url, exc)
+        return None
+
+    posts: List[Dict[str, Any]] = []
+    channel = root.find("channel")           # RSS 2.0
+    if channel is not None:
+        for item in channel.findall("item"):
+            title_el = item.find("title")
+            pub_el   = item.find("pubDate")
+            link_el  = item.find("link")
+            posts.append({
+                "title":     (title_el.text or "").strip() if title_el is not None else "",
+                "published": (pub_el.text   or "").strip() if pub_el   is not None else "",
+                "url":       (link_el.text  or "").strip() if link_el  is not None else "",
+            })
+    else:
+        # Atom 1.0 fallback
+        ns = "http://www.w3.org/2005/Atom"
+        for entry in root.findall(f"{{{ns}}}entry"):
+            title_el = entry.find(f"{{{ns}}}title")
+            pub_el   = (entry.find(f"{{{ns}}}published")
+                        or entry.find(f"{{{ns}}}updated"))
+            link_el  = entry.find(f"{{{ns}}}link")
+            posts.append({
+                "title":     (title_el.text or "").strip() if title_el is not None else "",
+                "published": (pub_el.text   or "").strip() if pub_el   is not None else "",
+                "url":       link_el.get("href", "")       if link_el  is not None else "",
+            })
+
+    _log.info("Wix blog RSS: %d post(s) at %s", len(posts), feed_url)
+    return posts

@@ -35,7 +35,7 @@ from auditors.scrape_utils import (
     get_headings, get_word_count,
 )
 
-_JS_SPA_PLATFORMS = {"react", "vue"}
+_JS_SPA_PLATFORMS = {"react", "vue", "wix"}
 
 log = logging.getLogger(__name__)
 

@@ -36,6 +36,7 @@ from auditors.freshness_auditor import FreshnessAuditor
 from auditors.social_auditor import SocialMediaAuditor
 from auditors.content_auditor import ContentAuditor
 from auditors.website_auditor import WebsiteAuditor
+from auditors.scrape_utils import fetch_wix_blog_rss
 from auditors.seo_auditor import SEOAuditor
 from auditors.geo_auditor import GEOAuditor
 from analyzers.ai_analyzer import AIAnalyzer
@@ -119,7 +120,7 @@ def _build_base_channel_data(website_url: str) -> dict:
     }
 
 
-def _merge_website_data(channel_data: dict, website_audit: dict):
+def _merge_website_data(channel_data: dict, website_audit: dict, base_url: str = ""):
     """
     Extract what we can from the live WebsiteAuditor result and write it into
     preloaded_channel_data["website"] so ICP/funnel auditors get fresh data.
@@ -191,6 +192,15 @@ def _merge_website_data(channel_data: dict, website_audit: dict):
         any(slug in url for url in page_urls_lc for slug in _blog_slugs)
         or _has("blog", "article", "post", "read more", "latest news")
     )
+    # Wix blog RSS: deterministic ground truth — overrides text-based detection when available.
+    platform = (website_audit.get("platform") or "unknown").lower()
+    if platform == "wix" and base_url:
+        rss = fetch_wix_blog_rss(base_url)
+        if rss is not None:
+            # Feed reachable → blog feature enabled regardless of post count
+            site["has_blog"] = True
+            site["wix_blog_post_count"] = len(rss)
+        # rss is None → 404 (no blog) or fetch error; keep text-based detection result
     site["has_podcast"]       = _has("podcast", "listen", "episode", "spotify")
     site["has_pricing"]       = _has("pricing", "price", "per month", "/month",
                                       "starting at", "packages")
@@ -464,7 +474,7 @@ def run_audit():
     audit_data["website"] = website_auditor.run()
 
     # Merge live website data into preloaded config for downstream auditors
-    _merge_website_data(channel_data, audit_data["website"])
+    _merge_website_data(channel_data, audit_data["website"], config.website_url or "")
 
     print("→ Auditing SEO...")
     pagespeed_key = os.environ.get("PAGESPEED_API_KEY", "")

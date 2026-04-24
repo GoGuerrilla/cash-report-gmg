@@ -63,7 +63,7 @@ PSI_AUDIT_MAP = {
     "hreflang":           "hreflang tags",
 }
 
-_JS_SPA_PLATFORMS = {"react", "vue"}
+_JS_SPA_PLATFORMS = {"react", "vue", "wix"}
 # Signals where render comparison is meaningful
 _RENDER_CHECK_KEYS = ("title", "meta", "h1", "schema", "og")
 
@@ -364,6 +364,11 @@ class SEOAuditor:
         self._render_status = status_msg
 
         if not rendered_html:
+            if self._platform == "wix":
+                log.warning(
+                    "render_page failed for Wix site %s: %s",
+                    self.base_url, status_msg,
+                )
             return raw_signals  # render failed — keep raw signals unchanged
 
         self._render_used = True
