@@ -929,16 +929,21 @@ class PDFReportGenerator:
         snap_rows = []
 
         # LinkedIn
+        li_fallback = False
         if self.config.linkedin_url:
             li = ch_data.get("linkedin", {})
+            li_fallback = li.get("data_source") == "linkedin_reachable_fallback"
+            _li_days_val = (li.get("days_since_last_post")
+                            or fresh_ch.get("LinkedIn", {}).get("days_since_last_post"))
             snap_rows.append((
                 "LinkedIn",
-                _fmt_count(li.get("followers")),
-                _fmt_ppw(li.get("posts_per_week")),
-                _fmt_days(li.get("days_since_last_post")
-                          or fresh_ch.get("LinkedIn", {}).get("days_since_last_post")),
-                _active_badge(li.get("posts_per_week"),
-                              li.get("days_since_last_post")),
+                "—¹" if li_fallback else _fmt_count(li.get("followers")),
+                "—¹" if (li_fallback and li.get("posts_per_week") is None)
+                     else _fmt_ppw(li.get("posts_per_week")),
+                "—¹" if (li_fallback and _li_days_val is None)
+                     else _fmt_days(_li_days_val),
+                _sbadge("ok", "✓ Confirmed · See detail below") if li_fallback
+                else _active_badge(li.get("posts_per_week"), li.get("days_since_last_post")),
             ))
 
         # YouTube
@@ -1007,11 +1012,40 @@ class PDFReportGenerator:
                 f'<tbody>{snap_tbody}</tbody></table>'
             )
             body += f'{_sub("Social Media Snapshot")}{snap_table}'
+            if li_fallback:
+                body += (
+                    '<p style="font-size:10px;color:rgba(255,255,255,.4);'
+                    'margin-top:-10px;margin-bottom:14px">'
+                    '&#185;See LinkedIn Presence section for details</p>'
+                )
+
+        if li_fallback:
+            body += self._section_linkedin_fallback()
 
         if strategy:
             body += f'<div class="strategy-box">{_h(strategy)}</div>'
 
         return _pg(6, body, self.date_str, self.logo_src)
+
+    def _section_linkedin_fallback(self) -> str:
+        return (
+            f'{_sub("LinkedIn Presence")}'
+            f'<div class="callout-green">'
+            f'<div class="callout-label">&#10003; Profile verified and publicly reachable</div>'
+            f'</div>'
+            f'<div class="text-body">Follower and engagement metrics temporarily unavailable. '
+            f'LinkedIn has tightened data access across all third-party analytics tools. '
+            f'We\'re migrating to an upgraded data partner, and full metrics will appear '
+            f'in your next C.A.S.H. Report.</div>'
+            f'<div class="text-body">LinkedIn remains the highest-trust platform for financial '
+            f'advisers and B2B professionals. Even without follower counts, consistent posting '
+            f'on thought leadership, client stories, and market commentary compounds authority '
+            f'over time. Aim for 2&#8211;3 posts/week minimum to stay visible to your network.</div>'
+            f'<div class="info-box">'
+            f'<strong>Next report will include:</strong> follower count, monthly follower '
+            f'growth, top-performing post, engagement rate.'
+            f'</div>'
+        )
 
     # ── PAGE 7: Sales (S) ─────────────────────────────────────────────────────
 
