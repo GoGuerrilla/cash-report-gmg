@@ -10,3 +10,4 @@ google-analytics-data
 google-auth
 google-auth-httplib2
 playwright
+feedparser
