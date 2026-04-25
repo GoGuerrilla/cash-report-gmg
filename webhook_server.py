@@ -150,6 +150,7 @@ from auditors.freshness_auditor import FreshnessAuditor
 from auditors.competitor_auditor import CompetitorAuditor
 from auditors.analytics_auditor import AnalyticsAuditor
 from auditors.meta_auditor import MetaAuditor
+from auditors.hold_utils import send_hold_warning_email
 from analyzers.ai_analyzer import AIAnalyzer
 from reports.pdf_generator import PDFReportGenerator
 from reports.docx_generator import DocxReportGenerator
@@ -478,43 +479,6 @@ def _safe_audit_timed(label: str, fn, default: dict) -> tuple:
     elapsed = round(time.time() - t0, 2)
     log.info("TIMING  %-20s  %.2fs", label, elapsed)
     return result, elapsed
-
-
-def _send_hold_warning_email(config: ClientConfig, contact_email: str, reason: str):
-    """Send admin warning when report is held due to insufficient data."""
-    sg_key     = os.environ.get("SENDGRID_API_KEY", "").strip()
-    from_addr  = (os.environ.get("SENDGRID_FROM_EMAIL")
-                  or os.environ.get("REPORT_EMAIL_FROM", "")).strip()
-    admin_addr = os.environ.get("ADMIN_NOTIFY_EMAIL", "gmg@goguerrilla.xyz").strip()
-    if not sg_key or not from_addr or not admin_addr:
-        log.warning("Hold warning email skipped — missing SendGrid config")
-        return
-    body = (
-        f"⚠️ REPORT HELD — INSUFFICIENT DATA\n"
-        f"{'─' * 40}\n"
-        f"Client  : {config.client_name}\n"
-        f"Website : {config.website_url or '—'}\n"
-        f"Email   : {contact_email or '—'}\n\n"
-        f"Reason: {reason}\n\n"
-        f"Action required: manually verify the client's website and social data, "
-        f"then re-trigger the audit from the admin panel."
-    )
-    try:
-        import urllib.request as _ur, json as _json
-        payload = _json.dumps({
-            "personalizations": [{"to": [{"email": admin_addr}]}],
-            "from":    {"email": from_addr},
-            "subject": f"⚠️ Report Held — Insufficient Data: {config.client_name}",
-            "content": [{"type": "text/plain", "value": body}],
-        }).encode()
-        req = _ur.Request(
-            "https://api.sendgrid.com/v3/mail/send", data=payload,
-            headers={"Authorization": f"Bearer {sg_key}",
-                     "Content-Type": "application/json"}, method="POST")
-        with _ur.urlopen(req, timeout=10) as r:
-            log.info("Hold warning email sent → %s (status %s)", admin_addr, r.status)
-    except Exception as e:
-        log.warning("Hold warning email failed: %s", e)
 
 
 def _data_confidence_check(
@@ -1061,7 +1025,7 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
     # ══ Data confidence check (post-Phase-3, pre-AI) ══════════════
     audit_data["confidence"] = _data_confidence_check(config, audit_data, channel_data)
     if audit_data["confidence"].get("hold_report"):
-        _send_hold_warning_email(
+        send_hold_warning_email(
             config, contact_email,
             audit_data["confidence"]["hold_reason"],
         )
