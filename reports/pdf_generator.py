@@ -1067,18 +1067,14 @@ class PDFReportGenerator:
             f'<div class="callout-green">'
             f'<div class="callout-label">&#10003; Profile verified and publicly reachable</div>'
             f'</div>'
-            f'<div class="text-body">Follower and engagement metrics temporarily unavailable. '
-            f'LinkedIn has tightened data access across all third-party analytics tools. '
-            f'We\'re migrating to an upgraded data partner, and full metrics will appear '
-            f'in your next C.A.S.H. Report.</div>'
+            f'<div class="text-body">Detailed engagement metrics could not be retrieved for this audit. '
+            f'The LinkedIn page loaded successfully, but our enrichment data source returned no usable '
+            f'post-level data this run &#8212; this can be intermittent. Please re-run the audit if '
+            f'needed, or contact us if the issue persists.</div>'
             f'<div class="text-body">LinkedIn remains the highest-trust platform for financial '
-            f'advisers and B2B professionals. Even without follower counts, consistent posting '
+            f'advisers and B2B professionals. Even without engagement counts, consistent posting '
             f'on thought leadership, client stories, and market commentary compounds authority '
             f'over time. Aim for 2&#8211;3 posts/week minimum to stay visible to your network.</div>'
-            f'<div class="info-box">'
-            f'<strong>Next report will include:</strong> follower count, monthly follower '
-            f'growth, top-performing post, engagement rate.'
-            f'</div>'
         )
 
     # ── PAGE 7: Sales (S) ─────────────────────────────────────────────────────

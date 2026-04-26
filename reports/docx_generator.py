@@ -889,9 +889,10 @@ class DocxReportGenerator:
         p1.paragraph_format.space_before = Pt(4)
         p1.paragraph_format.space_after  = Pt(8)
         r1 = p1.add_run(
-            "Follower and engagement metrics temporarily unavailable. LinkedIn has tightened "
-            "data access across all third-party analytics tools. We're migrating to an upgraded "
-            "data partner, and full metrics will appear in your next C.A.S.H. Report."
+            "Detailed engagement metrics could not be retrieved for this audit. The LinkedIn "
+            "page loaded successfully, but our enrichment data source returned no usable "
+            "post-level data this run — this can be intermittent. Please re-run the audit if "
+            "needed, or contact us if the issue persists."
         )
         r1.font.name = "Calibri"; r1.font.size = Pt(10)
         r1.font.color.rgb = _rgb(DGRAY)
@@ -900,31 +901,12 @@ class DocxReportGenerator:
         p2.paragraph_format.space_after  = Pt(8)
         r2 = p2.add_run(
             "LinkedIn remains the highest-trust platform for financial advisers and B2B "
-            "professionals. Even without follower counts, consistent posting on thought "
+            "professionals. Even without engagement counts, consistent posting on thought "
             "leadership, client stories, and market commentary compounds authority over time. "
             "Aim for 2–3 posts/week minimum to stay visible to your network."
         )
         r2.font.name = "Calibri"; r2.font.size = Pt(10)
         r2.font.color.rgb = _rgb(DGRAY)
-        tbl = doc.add_table(rows=1, cols=1)
-        tbl.style = "Table Grid"
-        tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
-        c = tbl.rows[0].cells[0]
-        _shade_cell(c, LGRAY)
-        c.width = Inches(6.5)
-        p3 = c.paragraphs[0]
-        p3.paragraph_format.space_before = Pt(6)
-        p3.paragraph_format.space_after  = Pt(6)
-        p3.paragraph_format.left_indent  = Pt(6)
-        r3h = p3.add_run("Next report will include:  ")
-        r3h.bold = True; r3h.font.name = "Calibri"; r3h.font.size = Pt(9)
-        r3h.font.color.rgb = _rgb(NAVY)
-        r3b = p3.add_run(
-            "follower count, monthly follower growth, top-performing post, engagement rate."
-        )
-        r3b.font.name = "Calibri"; r3b.font.size = Pt(9)
-        r3b.font.color.rgb = _rgb(DGRAY)
-        doc.add_paragraph()
 
     # ── Section S: Sales ───────────────────────────────────────
 
