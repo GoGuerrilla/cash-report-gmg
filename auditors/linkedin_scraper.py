@@ -107,8 +107,7 @@ def _apify_enrich(linkedin_url: str, result: Dict[str, Any]) -> None:
     """
     api_key = os.environ.get("APIFY_API_KEY", "")
     if not api_key:
-        result["data_source"] = "linkedin_reachable_fallback"
-        return
+        raise RuntimeError("apify_enrich: APIFY_API_KEY not set")
 
     payload = json.dumps({
         "url":   _normalize_linkedin_url(linkedin_url),
@@ -120,63 +119,59 @@ def _apify_enrich(linkedin_url: str, result: Dict[str, Any]) -> None:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            posts = json.loads(resp.read().decode("utf-8"))
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        posts = json.loads(resp.read().decode("utf-8"))
 
-        if not isinstance(posts, list) or not posts:
-            result["data_source"] = "linkedin_reachable_fallback"
-            return
+    if not isinstance(posts, list) or not posts:
+        raise RuntimeError(
+            f"apify_enrich: empty or malformed response for {linkedin_url}"
+        )
 
-        dates: List[datetime] = []
-        headlines: List[str]  = []
-        total_likes = total_comments = total_reactions = 0
+    dates: List[datetime] = []
+    headlines: List[str]  = []
+    total_likes = total_comments = total_reactions = 0
 
-        for post in posts:
-            pub = post.get("pubDate") or post.get("publishedAt") or post.get("date")
-            if pub:
-                try:
-                    dt = datetime.fromisoformat(
-                        str(pub).replace("Z", "+00:00")
-                    ).replace(tzinfo=timezone.utc)
-                    dates.append(dt)
-                except ValueError:
-                    pass
+    for post in posts:
+        pub = post.get("pubDate") or post.get("publishedAt") or post.get("date")
+        if pub:
+            try:
+                dt = datetime.fromisoformat(
+                    str(pub).replace("Z", "+00:00")
+                ).replace(tzinfo=timezone.utc)
+                dates.append(dt)
+            except ValueError:
+                pass
 
-            total_likes     += int(post.get("likes",     0) or 0)
-            total_comments  += int(post.get("comments",  0) or 0)
-            total_reactions += int(post.get("reactions", 0) or 0)
+        total_likes     += int(post.get("likes",     0) or 0)
+        total_comments  += int(post.get("comments",  0) or 0)
+        total_reactions += int(post.get("reactions", 0) or 0)
 
-            text = post.get("text") or post.get("content") or post.get("title") or ""
-            if len(text) >= 10:
-                headlines.append(text[:120])
+        text = post.get("text") or post.get("content") or post.get("title") or ""
+        if len(text) >= 10:
+            headlines.append(text[:120])
 
-        dates.sort(reverse=True)
-        now = datetime.now(timezone.utc)
+    dates.sort(reverse=True)
+    now = datetime.now(timezone.utc)
 
-        if dates:
-            days_since = (now - dates[0]).days
-            result.update({
-                "days_since_last_post": days_since,
-                "posts_per_week":       _posts_per_week(dates),
-                "is_active":            days_since <= 30,
-                "post_dates":           [d.strftime("%Y-%m-%d") for d in dates],
-            })
+    if dates:
+        days_since = (now - dates[0]).days
+        result.update({
+            "days_since_last_post": days_since,
+            "posts_per_week":       _posts_per_week(dates),
+            "is_active":            days_since <= 30,
+            "post_dates":           [d.strftime("%Y-%m-%d") for d in dates],
+        })
 
-        if headlines:
-            result["recent_headlines"] = headlines[:5]
+    if headlines:
+        result["recent_headlines"] = headlines[:5]
 
-        n = len(posts)
-        if n:
-            result["avg_likes"]     = round(total_likes     / n, 1)
-            result["avg_comments"]  = round(total_comments  / n, 1)
-            result["avg_reactions"] = round(total_reactions / n, 1)
+    n = len(posts)
+    if n:
+        result["avg_likes"]     = round(total_likes     / n, 1)
+        result["avg_comments"]  = round(total_comments  / n, 1)
+        result["avg_reactions"] = round(total_reactions / n, 1)
 
-        result["data_source"] = "apify_linkedin_posts"
-
-    except Exception as exc:
-        _log.warning("apify_enrich failed: %s", exc)
-        result["data_source"] = "linkedin_reachable_fallback"
+    result["data_source"] = "apify_linkedin_posts"
 
 
 def _fetch(url: str) -> Optional[str]:
@@ -313,7 +308,13 @@ def scrape(linkedin_url: str) -> Dict[str, Any]:
         result["recent_headlines"] = headlines
 
     if result["data_source"] == "linkedin_reachable":
-        _apify_enrich(base, result)
+        try:
+            _apify_enrich(base, result)
+        except Exception as exc:
+            _log.warning(
+                "apify_enrich failed for %s — falling back: %s", base, exc
+            )
+            result["data_source"] = "linkedin_reachable_fallback"
 
     _log.info(
         "linkedin_scrape_result url=%s data_source=%s followers=%s",
