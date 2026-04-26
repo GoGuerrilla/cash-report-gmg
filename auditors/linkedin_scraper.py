@@ -71,6 +71,33 @@ def _normalize_linkedin_url(url: str) -> str:
     return m.group(1) + "/"
 
 
+def _is_valid_linkedin_company_url(url: str) -> bool:
+    """
+    True if URL is a valid PUBLIC LinkedIn company page URL.
+    Rejects: /admin/ paths, /in/ personal profiles, numeric-ID-only
+    company URLs, slugs shorter than 3 chars, missing matches.
+
+    Used at the auto-discovery boundary in
+    intake/questionnaire.py:_classified_to_platforms to prevent
+    bad URLs (e.g., /company/12628998/admin/ pasted into a client's
+    website by mistake) from reaching the scraper and producing
+    misleading "data unavailable" output downstream.
+    """
+    if not url:
+        return False
+    if "/admin" in url.lower():
+        return False
+    m = _LI_COMPANY_RE.match(url)
+    if not m:
+        return False
+    slug = m.group(1).rstrip("/").rsplit("/", 1)[-1]
+    if slug.isdigit():
+        return False
+    if len(slug) < 3:
+        return False
+    return True
+
+
 def _apify_enrich(linkedin_url: str, result: Dict[str, Any]) -> None:
     """
     Fetches post data via Apify harvestapi/linkedin-company-posts (sync run, max 10 posts).
