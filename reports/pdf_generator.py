@@ -795,7 +795,10 @@ class PDFReportGenerator:
         web_fields = "".join([
             _field("URL",      _h(web.get("url", self.config.website_url or "—"))),
             _field("HTTPS",    f'{_sdot("g")}Yes' if web.get("https_enabled") else f'{_sdot("r")}No'),
-            _field("Load Time", _h(f'{web.get("load_time_seconds", "?")}s')),
+            _field("Load Time", _h(
+                "—" if web.get("load_time_seconds") is None
+                else f'{web.get("load_time_seconds")}s'
+            )),
             _field("Platform",  _h((web.get("platform") or "Unknown").title())),
             _field("Data Reliability", f'<span class="td-good">{rel_score}/100 — High reliability</span>'
                    if isinstance(rel_score, int) and rel_score >= 80 else _h(str(rel_score))),
