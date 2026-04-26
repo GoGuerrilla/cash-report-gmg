@@ -35,9 +35,6 @@ from auditors.scrape_utils import (
     get_og_tags, get_twitter_card, get_robots_meta,
     get_headings, get_word_count,
 )
-from auditors.wix_detector import is_wix
-from auditors.wix_rss import fetch_wix_blog
-from auditors.apify_render import apify_render
 
 _JS_SPA_PLATFORMS = {"react", "vue", "wix"}
 
@@ -248,23 +245,6 @@ class WebsiteAuditor:
         ]
         results["homepage"] = pages_data[0] if pages_data else {}
         results["platform"] = self.platform
-
-        # ── Wix detection and enrichment ─────────────────────
-        if html and is_wix(html):
-            log.info("Wix detected: %s", self.base_url)
-            _blog       = fetch_wix_blog(self.base_url)
-            _blog_links = [p["link"] for p in _blog.get("posts", []) if p.get("link")]
-            _wix_pages  = apify_render(self.base_url, exclude_urls=_blog_links)
-            if _blog["fetched"] and _wix_pages:
-                results["data_source"] = "wix_rss_plus_apify"
-            elif _blog["fetched"]:
-                results["data_source"] = "wix_rss_blog_only"
-            elif _wix_pages:
-                results["data_source"] = "wix_apify_only"
-            else:
-                results["data_source"] = "wix_unscrapable"
-            results["wix_blog"]  = _blog
-            results["wix_pages"] = _wix_pages
 
         # ── Step 2: All-fail auto-retry ──────────────────────
         hp = results["homepage"]
