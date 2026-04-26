@@ -15,6 +15,7 @@ Design principles
   5. All-fail auto-retry — if homepage signals all blank, re-fetch once.
   6. Data quality — returns a data_quality dict with reliability score 0–100.
 """
+import os
 import re
 import time
 import logging
@@ -68,6 +69,115 @@ _SERVICE_SLUGS = frozenset({
 })
 
 
+def _adapt_apify_to_pages(apify_result: dict) -> List[Dict]:
+    """Convert apify_content.fetch() output to the per-page dict shape that
+    _analyze_page() produces, so all downstream consumers work unchanged."""
+    pages_raw = apify_result.get("pages", [])
+    all_links = apify_result.get("internal_links", [])
+    platform  = (apify_result.get("platform_hints") or ["unknown"])[0]
+    adapted: List[Dict] = []
+
+    for i, page in enumerate(pages_raw):
+        url      = page.get("url", "")
+        title    = page.get("title") or ""
+        meta_desc = page.get("meta_description") or ""
+        headings = page.get("headings", [])
+        h1s      = [h["text"] for h in headings if h["level"] == 1]
+        h2s      = [h for h in headings if h["level"] == 2]
+        struct   = page.get("structured_data", [])
+        forms    = page.get("forms", [])
+        ctas     = page.get("ctas", [])
+        images   = page.get("images", [])
+        text     = page.get("text", "")
+
+        # page_type — first page is always homepage; others inferred from slug
+        if i == 0:
+            page_type = "homepage"
+        else:
+            path_parts = {
+                seg.lower().rstrip("/")
+                for seg in urlparse(url).path.split("/") if seg
+            }
+            if path_parts & _ABOUT_SLUGS:
+                page_type = "about"
+            elif path_parts & _SERVICE_SLUGS:
+                page_type = "service"
+            else:
+                page_type = "other"
+
+        schema_types = [obj.get("@type", "") for obj in struct if obj.get("@type")]
+
+        # lead magnet — scan apify CTAs for href/text keyword matches
+        lead_magnet_url = None
+        lead_magnet_cta = None
+        for cta in ctas:
+            href_lc = (cta.get("href") or "").lower()
+            text_lc = (cta.get("text") or "").lower()
+            if any(kw in href_lc for kw in _LEAD_MAGNET_HREF_KWS):
+                lead_magnet_url = (cta.get("href") or "").strip()
+                lead_magnet_cta = cta.get("text", "")
+                break
+            if not lead_magnet_url and any(kw in text_lc for kw in _LEAD_MAGNET_TEXT_KWS):
+                lead_magnet_url = (cta.get("href") or "").strip()
+                lead_magnet_cta = cta.get("text", "")
+
+        int_links        = sum(1 for lk in all_links if lk.get("from_url") == url)
+        has_phone        = bool(re.search(r'\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}', text))
+        has_email        = bool(re.search(r'[\w.+-]+@[\w-]+\.[\w.-]+', text))
+        images_missing_alt = sum(1 for img in images if img.get("alt") is None)
+
+        validation_states = {
+            "title":    "found" if title    else "missing",
+            "meta":     "found" if meta_desc else "missing",
+            "h1":       "found" if h1s      else "missing",
+            "schema":   "found" if schema_types else "missing",
+            "og":       "unable",
+            "twitter":  "unable",
+            "viewport": "unable",
+        }
+
+        adapted.append({
+            "url":                     url,
+            "page_type":               page_type,
+            "status_code":             200,
+            "load_time":               None,
+            "platform":                platform,
+            "crawl_quality":           "ok",
+            "validation_states":       validation_states,
+            "title":                   title,
+            "title_length":            len(title),
+            "meta_description":        meta_desc,
+            "meta_description_length": len(meta_desc),
+            "h1_count":                len(h1s),
+            "h1_text":                 h1s,
+            "h2_count":                len(h2s),
+            "canonical_url":           None,
+            "is_indexable":            True,
+            "has_og_tags":             False,
+            "has_og_image":            False,
+            "has_twitter_card":        False,
+            "schema_types":            schema_types,
+            "has_schema_markup":       bool(schema_types),
+            "has_viewport_meta":       False,
+            "image_count":             len(images),
+            "images_missing_alt":      images_missing_alt,
+            "internal_links":          int_links,
+            "external_links":          0,
+            "cta_count":               len(ctas),
+            "word_count":              len(text.split()),
+            "has_phone":               has_phone,
+            "has_email_visible":       has_email,
+            "lead_magnet_url":         lead_magnet_url,
+            "lead_magnet_cta":         lead_magnet_cta,
+            "has_form":                bool(forms),
+            "form_count":              len(forms),
+            "has_iframe":              False,
+            "iframe_sources":          [],
+        })
+
+    return adapted
+
+
 class WebsiteAuditor:
     def __init__(self, url: str, max_pages: int = 10):
         self.base_url    = url.rstrip("/")
@@ -105,25 +215,38 @@ class WebsiteAuditor:
             results["https_enabled"] = final_url.startswith("https")
 
         # ── Step 1: Crawl target pages ───────────────────────
-        try:
-            pages_data = self._crawl_target_pages(results, cached_html=html,
-                                                   cached_status=status)
-            results["pages"]         = pages_data
-            results["pages_crawled"] = len(pages_data)
-            results["pages_detail"]  = [
-                {"url": p["url"], "type": p.get("page_type", "other"),
-                 "title": p.get("title", ""), "h1_count": p.get("h1_count", 0),
-                 "word_count": p.get("word_count", 0),
-                 "has_schema": p.get("has_schema_markup", False)}
-                for p in pages_data
-            ]
-            results["homepage"] = pages_data[0] if pages_data else {}
-        except Exception as e:
-            results["status"] = "error"
-            results["issues"].append(f"Crawl error: {str(e)}")
-            self._attach_data_quality(results, redirects_resolved)
-            return results
+        if os.environ.get("USE_APIFY_CONTENT", "").strip() == "1":
+            from auditors import apify_content
+            apify_result  = apify_content.fetch(self.base_url)
+            self.platform = (apify_result.get("platform_hints") or ["unknown"])[0]
+            pages_data    = _adapt_apify_to_pages(apify_result)
+            log.info(
+                "[APIFY_CONTENT_ON] base_url=%s pages=%d blog_posts=%d "
+                "platform_hints=%s data_source=apify_content_crawler",
+                self.base_url, len(pages_data),
+                len(apify_result.get("blog_posts", [])),
+                apify_result.get("platform_hints", []),
+            )
+        else:
+            try:
+                pages_data = self._crawl_target_pages(results, cached_html=html,
+                                                       cached_status=status)
+            except Exception as e:
+                results["status"] = "error"
+                results["issues"].append(f"Crawl error: {str(e)}")
+                self._attach_data_quality(results, redirects_resolved)
+                return results
 
+        results["pages"]         = pages_data
+        results["pages_crawled"] = len(pages_data)
+        results["pages_detail"]  = [
+            {"url": p["url"], "type": p.get("page_type", "other"),
+             "title": p.get("title", ""), "h1_count": p.get("h1_count", 0),
+             "word_count": p.get("word_count", 0),
+             "has_schema": p.get("has_schema_markup", False)}
+            for p in pages_data
+        ]
+        results["homepage"] = pages_data[0] if pages_data else {}
         results["platform"] = self.platform
 
         # ── Wix detection and enrichment ─────────────────────
