@@ -6,9 +6,6 @@ awareness → interest → consideration → contact/conversion.
 from typing import Dict, Any, List
 from config import ClientConfig
 
-# Platforms that render significant content via JavaScript — raw HTML scraping
-# cannot reliably detect testimonials, blog posts, or client logos on these.
-_JS_PLATFORMS = ("wix", "squarespace", "webflow", "spa", "wordpress")
 
 
 class FunnelAuditor:
@@ -163,17 +160,8 @@ class FunnelAuditor:
                 "the primary nurture channel for B2B financial services."
             )
 
-        _site_platform = (preloaded.get("website", {}).get("platform") or "").lower()
-
         if has_blog:
             strengths.append("✅ Blog/content hub present for SEO and long-cycle nurture.")
-        elif _site_platform in _JS_PLATFORMS:
-            issues.append(
-                f"🔵 Blog/content hub could not be confirmed — your site uses "
-                f"{_site_platform.title()} which renders content via JavaScript, making it "
-                f"invisible to raw HTML scrapers. If you have a blog, this is a platform "
-                f"limitation, not a content gap. Verify it is indexed in Google Search Console."
-            )
         else:
             issues.append(
                 "🟡 No blog or content hub visible. Long-form content builds trust "
@@ -251,17 +239,8 @@ class FunnelAuditor:
         client_count       = self.config.current_client_count
         client_types       = self.config.current_client_types
 
-        _site_platform = (preloaded.get("website", {}).get("platform") or "").lower()
-
         if has_testimonials:
             strengths.append("✅ Testimonials present on website.")
-        elif _site_platform in _JS_PLATFORMS:
-            issues.append(
-                f"🔵 Testimonials could not be confirmed — your site uses "
-                f"{_site_platform.title()} which renders reviews and testimonial widgets via "
-                f"JavaScript. If testimonials are displayed on your site, this is a platform "
-                f"limitation, not a trust gap. Ensure they are visible to Google for SEO benefit."
-            )
         else:
             issues.append(
                 "🔴 No testimonials visible. Financial advisors rely heavily on "
@@ -298,12 +277,6 @@ class FunnelAuditor:
 
         if has_client_logos:
             strengths.append("✅ Client logos visible — at-a-glance social proof.")
-        elif _site_platform in _JS_PLATFORMS:
-            issues.append(
-                f"🔵 Client logos could not be confirmed — {_site_platform.title()} renders "
-                f"logo carousels and image grids via JavaScript. If client logos are displayed, "
-                f"this is a scraping limitation, not a missing trust signal."
-            )
         else:
             issues.append("🟡 No client logos or 'as seen in' badges.")
 
