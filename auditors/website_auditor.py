@@ -88,7 +88,7 @@ def _adapt_apify_to_pages(apify_result: dict) -> List[Dict]:
         forms    = page.get("forms", [])
         ctas     = page.get("ctas", [])
         images   = page.get("images", [])
-        text     = page.get("text", "")
+        text     = page.get("text") or ""
 
         # page_type — first page is always homepage; others inferred from slug
         if i == 0:

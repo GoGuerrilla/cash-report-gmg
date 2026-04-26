@@ -490,10 +490,10 @@ def _extract_text(html: str, url: str = "") -> Optional[str]:
     for tag in soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6"]):
         tag.decompose()
 
-    root = soup.find("main") or soup.find("body")
-    if not root:
+    root = soup.find("main") or soup.find("body") or soup
+    if not root or not list(root.descendants):
         _log.warning(
-            "apify_content: _extract_text found no <main> or <body> — url=%s", url
+            "apify_content: _extract_text found no usable root — url=%s", url
         )
         return None
 
