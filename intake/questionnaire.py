@@ -23,6 +23,7 @@ from typing import Dict, Any
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import ClientConfig
 from auditors.industry_benchmarks import INDUSTRIES, INDUSTRY_GROUPS
+from auditors.linkedin_scraper import _is_valid_linkedin_company_url
 from intake.client_db import save_intake_record
 
 INTAKE_SAVE_PATH = os.path.join(os.path.dirname(__file__), "last_intake.json")
@@ -179,7 +180,13 @@ def _classified_to_platforms(classified: Dict[str, Any]) -> Dict[str, Any]:
     platforms: Dict[str, str] = {k: "" for k, _ in _PLATFORM_PATTERNS}
 
     if classified.get("LinkedIn"):
-        platforms["linkedin_url"] = classified["LinkedIn"][0]
+        for url in classified["LinkedIn"]:
+            if _is_valid_linkedin_company_url(url):
+                platforms["linkedin_url"] = url
+                break
+        # If no valid URL found, platforms["linkedin_url"] stays ""
+        # and the LinkedIn scraper is skipped downstream
+        # (per webhook_server.py: if config.linkedin_url:)
 
     if classified.get("Instagram"):
         u = classified["Instagram"][0]
