@@ -362,12 +362,12 @@ def run_audit():
         else:
             print(f"  ⚠️  LinkedIn scrape partial ({src}) — frequency unverified")
         # Merge into preloaded channel data so freshness auditor picks it up
-        channel_data["linkedin"].update({
-            k: v for k, v in li_data.items()
-            if k in ("followers", "posts_per_week", "days_since_last_post", "is_active",
-                     "data_source")
-            and v is not None
-        })
+        # Full merge — match YouTube pattern (line 389) so all
+        # enrichment fields (recent_headlines, post_dates, avg_likes,
+        # avg_comments, avg_reactions, etc.) flow downstream. None
+        # values pass through; downstream consumers handle them via
+        # truthiness checks.
+        channel_data["linkedin"].update(li_data)
 
     # ── 1d. YouTube Data API v3 ───────────────────────────────
     yt_key = os.environ.get("YOUTUBE_API_KEY", "")
