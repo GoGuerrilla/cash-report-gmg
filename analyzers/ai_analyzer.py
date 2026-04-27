@@ -318,6 +318,40 @@ class AIAnalyzer:
         _mod_lines = "\n".join(f"  {n}" for n in _mods.get("notes", [])) or "  None"
         _flag_lines = "\n".join(f"  ⚠ {f}" for f in _mods.get("flags", [])) or "  None"
 
+        if config.intake_completed:
+            _intake_directive = (
+                "INTAKE COMPLETED: True — full client context available. "
+                "You CAN use stated_target_market, stated_icp_industry, "
+                "stated_value_prop directly and confidently in recommendations."
+            )
+        else:
+            _intake_directive = (
+                "INTAKE COMPLETED: False — DATA RELIABILITY DIRECTIVE:\n"
+                "  Client did NOT complete an intake questionnaire. You do "
+                "NOT have confirmed ICP, target-market, or value-prop data "
+                "from them.\n"
+                "  REQUIRED behavior:\n"
+                "  • Replace 'the target buyer', 'your ideal client', 'the "
+                "buyer', 'the target client', 'their target market' phrasing "
+                "with: 'based on observed signals, the audience appears to "
+                "be...' OR 'the public-facing positioning suggests...'\n"
+                "  • Use 'appears', 'based on observed signals', 'public-"
+                "facing positioning suggests' — do NOT use possessive 'your "
+                "ICP' or 'your target market' when these are uncertain.\n"
+                "  • Do NOT instruct 'rewrite all copy to speak to [target]' "
+                "when [target] is uncertain. Instead: 'based on what's "
+                "visible, rewrite copy to speak to [observable audience "
+                "pattern]; OR define your ICP first, then rewrite.'\n"
+                "  • AVOID definitive negatives like 'no defined ICP', 'no "
+                "stated value prop', 'no target market'. Prefer 'no ICP "
+                "framing visible in public-facing content', 'no value prop "
+                "stated in public copy'.\n"
+                "  • Do NOT fabricate the client's ICP or target market. If "
+                "stated_target_market is 'Not provided', say so explicitly: "
+                "'because no ICP was provided, recommendations below are "
+                "based on observed signals only.'"
+            )
+
         return f"""You are a senior B2B digital marketing strategist. Analyze this real marketing audit data and respond ONLY with valid JSON — no markdown, no explanation.
 
 CLIENT: {config.client_name}
@@ -325,7 +359,7 @@ INDUSTRY: {config.client_industry}
 INDUSTRY CATEGORY: {config.industry_category or "Other"}
 CLIENT CATEGORY: {config.client_category or "Not provided"}
 AUDIT SOURCE: {getattr(config, 'audit_source', 'full_intake')}
-INTAKE COMPLETED: {config.intake_completed} — when False, soften specificity on ICP/target market claims and prefer "based on observed signals" framing rather than over-claiming the client's stated positioning
+{_intake_directive}
 GROWTH TIER: {_classify_growth_tier(config, audit_data)} — calibrate recommendation tone and type to this stage. early = foundational ("build the basics before optimizing"); growing = optimize-and-scale; established = refine-and-defend. Do not recommend establishing what already exists, and do not recommend optimizing what hasn't been built yet.
 STATED TARGET MARKET: {config.stated_target_market or "Not provided"}
 STATED ICP INDUSTRY: {config.stated_icp_industry or "Not provided"}
