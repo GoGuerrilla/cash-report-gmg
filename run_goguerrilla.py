@@ -206,7 +206,9 @@ def _merge_website_data(channel_data: dict, website_audit: dict, base_url: str =
     site["has_testimonials"] = (
         any(s in hp_schema_lc for s in ("review", "aggregaterating"))
         or any(slug in url for url in page_urls_lc for slug in _review_slugs)
-        or _has("testimonial", "review", "what our clients", "five star", "★", "⭐")
+        or _has("testimonial", "review", "what our clients", "what clients are saying",
+                "what our clients are saying", "client testimonials", "hear from our clients",
+                "happy clients", "client reviews", "client stories", "five star", "★", "⭐")
     )
     site["has_certifications"] = _has("certified", "certification", "google partner",
                                        "hubspot", "credential")
