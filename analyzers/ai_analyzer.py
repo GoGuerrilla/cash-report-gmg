@@ -39,6 +39,69 @@ except ImportError:
     pass
 
 
+def _classify_growth_tier(config, audit_data: dict) -> str:
+    """
+    Classify client as 'early' / 'growing' / 'established' from
+    observed signals. Drives AI synthesis tone calibration.
+
+    Scoring (each signal contributes 0-2 points; total range 0-10):
+      - team_size:            1pt at 2+, 2pt at 5+
+      - current_client_count: 1pt at 1+, 2pt at 10+
+      - email_list_size:      1pt at 100+, 2pt at 1000+
+      - linkedin_followers:   1pt at 500+, 2pt at 5000+
+      - youtube_subscribers:  1pt at 100+, 2pt at 1000+
+
+    Tiers:
+      0-3 points  → "early"       — foundational; build basics first
+      4-6 points  → "growing"     — early traction; optimize-and-scale
+      7-10 points → "established" — mature; refine-and-defend
+    """
+    points = 0
+
+    team = config.team_size or 1
+    if team >= 5:
+        points += 2
+    elif team >= 2:
+        points += 1
+
+    clients = config.current_client_count or 0
+    if clients >= 10:
+        points += 2
+    elif clients >= 1:
+        points += 1
+
+    email_list = config.email_list_size or 0
+    if email_list >= 1000:
+        points += 2
+    elif email_list >= 100:
+        points += 1
+
+    li_followers = (
+        (config.preloaded_channel_data or {})
+        .get("linkedin", {})
+        .get("followers") or 0
+    )
+    if li_followers >= 5000:
+        points += 2
+    elif li_followers >= 500:
+        points += 1
+
+    yt_subs = (
+        (audit_data.get("youtube") or {})
+        .get("subscriber_count") or 0
+    )
+    if yt_subs >= 1000:
+        points += 2
+    elif yt_subs >= 100:
+        points += 1
+
+    if points >= 7:
+        return "established"
+    if points >= 4:
+        return "growing"
+    return "early"
+
+
 class AIAnalyzer:
     def __init__(self, anthropic_api_key: str = "", openai_api_key: str = ""):
         # Accept explicit key, or fall back to environment variable
@@ -263,6 +326,7 @@ INDUSTRY CATEGORY: {config.industry_category or "Other"}
 CLIENT CATEGORY: {config.client_category or "Not provided"}
 AUDIT SOURCE: {getattr(config, 'audit_source', 'full_intake')}
 INTAKE COMPLETED: {config.intake_completed} — when False, soften specificity on ICP/target market claims and prefer "based on observed signals" framing rather than over-claiming the client's stated positioning
+GROWTH TIER: {_classify_growth_tier(config, audit_data)} — calibrate recommendation tone and type to this stage. early = foundational ("build the basics before optimizing"); growing = optimize-and-scale; established = refine-and-defend. Do not recommend establishing what already exists, and do not recommend optimizing what hasn't been built yet.
 STATED TARGET MARKET: {config.stated_target_market or "Not provided"}
 STATED ICP INDUSTRY: {config.stated_icp_industry or "Not provided"}
 BIGGEST CHALLENGE: {config.biggest_marketing_challenge or "Not provided"}
