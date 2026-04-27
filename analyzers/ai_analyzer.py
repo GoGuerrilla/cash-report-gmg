@@ -259,8 +259,12 @@ class AIAnalyzer:
 
 CLIENT: {config.client_name}
 INDUSTRY: {config.client_industry}
+INDUSTRY CATEGORY: {config.industry_category or "Other"}
+CLIENT CATEGORY: {config.client_category or "Not provided"}
 AUDIT SOURCE: {getattr(config, 'audit_source', 'full_intake')}
+INTAKE COMPLETED: {config.intake_completed} — when False, soften specificity on ICP/target market claims and prefer "based on observed signals" framing rather than over-claiming the client's stated positioning
 STATED TARGET MARKET: {config.stated_target_market or "Not provided"}
+STATED ICP INDUSTRY: {config.stated_icp_industry or "Not provided"}
 BIGGEST CHALLENGE: {config.biggest_marketing_challenge or "Not provided"}
 INTAKE SCORE MODIFIERS APPLIED:
 {_mod_lines}
