@@ -15,25 +15,6 @@ from docx.oxml import OxmlElement
 
 from config import ClientConfig
 
-_WIX_CAVEATS = {
-    "wix_rss_plus_apify": (
-        "This site is built on Wix. Blog content analyzed via public RSS feed; "
-        "FAQ and service pages analyzed via rendered fetch."
-    ),
-    "wix_rss_blog_only": (
-        "This site is built on Wix. Blog content analyzed via public RSS feed. "
-        "FAQ and service pages are JavaScript-rendered and not fully available to static "
-        "scraping; recommend follow-up audit for full C.A.S.H. fidelity."
-    ),
-    "wix_apify_only": (
-        "This site is built on Wix. Service pages analyzed via rendered fetch. "
-        "Blog feed was unavailable."
-    ),
-    "wix_unscrapable": (
-        "This site is built on Wix. Content could not be analyzed via static or rendered scraping."
-    ),
-}
-
 # ── Palette ────────────────────────────────────────────────────
 NAVY   = "1B2A4A"
 GOLD   = "C9A84C"
@@ -724,14 +705,6 @@ class DocxReportGenerator:
         self._issues_strengths(doc,
             freshness.get("issues", []) + seo.get("issues", []),
             freshness.get("strengths", []) + seo.get("strengths", []))
-
-        # Wix platform caveat
-        web_src = self.data.get("website", {}).get("data_source", "")
-        if web_src.startswith("wix_"):
-            caveat = _WIX_CAVEATS.get(web_src, "")
-            if caveat:
-                self._subsection(doc, "Platform Note — Wix Site Detected")
-                self._callout(doc, f"ℹ️  Data source: {web_src}\n\n{caveat}", MGRAY)
 
         # Content strategy recommendation
         cs = self.ai.get("content_strategy", "")
