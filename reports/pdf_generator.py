@@ -19,26 +19,6 @@ from typing import Any, Dict, List, Optional
 
 from config import ClientConfig
 
-# ── Logo ──────────────────────────────────────────────────────────────────────
-_WIX_CAVEATS = {
-    "wix_rss_plus_apify": (
-        "This site is built on Wix. Blog content analyzed via public RSS feed; "
-        "FAQ and service pages analyzed via rendered fetch."
-    ),
-    "wix_rss_blog_only": (
-        "This site is built on Wix. Blog content analyzed via public RSS feed. "
-        "FAQ and service pages are JavaScript-rendered and not fully available to static "
-        "scraping; recommend follow-up audit for full C.A.S.H. fidelity."
-    ),
-    "wix_apify_only": (
-        "This site is built on Wix. Service pages analyzed via rendered fetch. "
-        "Blog feed was unavailable."
-    ),
-    "wix_unscrapable": (
-        "This site is built on Wix. Content could not be analyzed via static or rendered scraping."
-    ),
-}
-
 _LOGO_SEARCH = [
     "/Users/davidsuppnick/Desktop/CASH GMG Audit/gmg_logo.png",
     os.path.join(os.path.dirname(__file__), "..", "gmg_cash_logo.png"),
@@ -858,18 +838,6 @@ class PDFReportGenerator:
                 f'<div class="callout-body">{_h(content_strategy)}</div>'
                 f'</div>'
             )
-
-        wix_src = web.get("data_source", "")
-        if wix_src.startswith("wix_"):
-            caveat = _WIX_CAVEATS.get(wix_src, "")
-            if caveat:
-                body += (
-                    f'{_sub("Platform Note — Wix Site Detected")}'
-                    f'<div class="callout-cyan">'
-                    f'<div class="callout-label">&#9432; Data source: {_h(wix_src)}</div>'
-                    f'<div class="callout-body">{_h(caveat)}</div>'
-                    f'</div>'
-                )
 
         return _pg(5, body, self.date_str, self.logo_src)
 
