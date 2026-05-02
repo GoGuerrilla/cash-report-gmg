@@ -350,6 +350,28 @@ class AIAnalyzer:
         else:
             _referral_line = f"REFERRAL SYSTEM: {_u(config.has_referral_system, False)}"
 
+        # Apify second-pass evidence summary (Push 4). When Apify upgraded a
+        # signal that the keyword scan missed, surface it so AI can qualify
+        # findings with "verified via second-pass crawl" instead of asserting
+        # absence based on the keyword scan alone.
+        _site_data = (config.preloaded_channel_data or {}).get("website", {}) or {}
+        _apify_confirmed = _site_data.get("apify_confirmed") or []
+        _apify_faqpage   = _site_data.get("apify_has_faqpage", False)
+        if _apify_confirmed or _apify_faqpage:
+            _apify_lines = []
+            for c in _apify_confirmed:
+                _apify_lines.append(f"  ✓ {c}")
+            if _apify_faqpage:
+                _apify_lines.append("  ✓ FAQPage schema confirmed by Apify second-pass")
+            _apify_block = (
+                "APIFY SECOND-PASS CONFIRMATIONS (positive evidence — keyword scan missed these):\n"
+                + "\n".join(_apify_lines)
+                + "\n  Note: When citing these signals, you MAY say 'verified via second-pass crawl'. "
+                + "Do NOT claim the absence of any signal listed here."
+            )
+        else:
+            _apify_block = "APIFY SECOND-PASS CONFIRMATIONS: None — keyword scan was the sole signal source."
+
         # Industry-specific guidance from auditors/industry_benchmarks.py.
         # Falls back to "Other" with explicit guard so Claude does not fabricate
         # industry claims when classification is missing.
@@ -450,6 +472,7 @@ INTAKE SCORE MODIFIERS APPLIED:
 {_mod_lines}
 INTAKE FLAGS:
 {_flag_lines}
+{_apify_block}
 STATED VALUE PROP: {config.stated_value_prop or "Not provided"}
 PRIMARY GOAL: {config.primary_goal}
 MONTHLY AD BUDGET: ${config.monthly_ad_budget:,.0f}
