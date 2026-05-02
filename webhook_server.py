@@ -348,36 +348,89 @@ def _parse_email_freq(raw: str):
     return raw.strip(), bool(raw.strip()), bool(raw.strip())
 
 
-def _infer_industry(target_market: str) -> tuple:
+def _infer_industry(target_market: str, business_name: str = "", website_url: str = "") -> tuple:
     """
-    Return (client_industry, industry_category) from target-market text.
-    Falls back to 'General' / 'Other'.
+    Return (client_industry, industry_category) from target-market text +
+    business name + website URL. Falls back to 'General' / 'Other'.
+
+    Uses a concatenated haystack so a cleaning service named 'Orchard Cleaning
+    Services' classifies correctly even if the buyer description doesn't mention
+    cleaning. Checks are ordered from most-specific to most-general so that, e.g.,
+    'Financial Advisory' wins over the generic 'Professional B2B Services' bucket.
     """
-    t = target_market.lower()
-    if any(k in t for k in ("financial advisor", "cpa", "accountant",
-                              "attorney", "law firm", "lawyer", "ria",
-                              "wealth manag", "fractional cfo", "fractional cmo")):
-        return "Professional Services", "Professional B2B Services"
-    if any(k in t for k in ("saas", "software", "tech", "developer",
-                              "startup", "app")):
-        return "SaaS & Tech", "SaaS & Tech"
-    if any(k in t for k in ("agency", "marketing", "consulting", "consultant",
-                              "b2b service", "coach", "speaker")):
-        return "Agency & Consulting", "Agency & Consulting"
-    if any(k in t for k in ("restaurant", "food", "cafe", "bar", "catering")):
-        return "Restaurant & Food Service", "Restaurant & Food Service"
-    if any(k in t for k in ("retail", "ecommerce", "e-commerce", "shop",
-                              "store", "product")):
-        return "Retail & E-commerce", "Retail & E-commerce"
-    if any(k in t for k in ("real estate", "realtor", "property",
-                              "mortgage", "broker")):
-        return "Real Estate", "Real Estate"
-    if any(k in t for k in ("healthcare", "medical", "dental", "clinic",
-                              "doctor", "therapist", "health")):
+    haystack = " ".join([target_market or "", business_name or "", website_url or ""]).lower()
+
+    # ── Professional Services (canonical sub-buckets) ─────────────
+    # 'ria firm' and 'ria advisor' (not bare 'ria') because 'ria' as a substring
+    # collides with words like 'pizzeria', 'nigeria', etc.
+    if any(k in haystack for k in ("financial advisor", "ria firm", "ria advisor",
+                                     "registered investment advisor", "wealth manag",
+                                     "fiduciary", "fractional cfo")):
+        return "Financial Advisory", "Financial Advisory"
+    if any(k in haystack for k in ("attorney", "law firm", "lawyer", "legal services",
+                                     "legal practice")):
+        return "Legal", "Legal"
+    if any(k in haystack for k in ("cpa", "accountant", "bookkeep", "tax preparer",
+                                     "tax preparation")):
+        return "Accounting & CPA", "Accounting & CPA"
+    if any(k in haystack for k in ("healthcare", "medical", "dental", "clinic",
+                                     "doctor", "therapist", "chiropract", "physical therap")):
         return "Healthcare & Medical", "Healthcare & Medical"
-    if any(k in t for k in ("nonprofit", "non-profit", "charity",
-                              "cause", "foundation")):
+
+    # ── Local & Consumer Business ─────────────────────────────────
+    if any(k in haystack for k in ("restaurant", "cafe", " bar ", "catering",
+                                     "food service", "bistro", "diner")):
+        return "Restaurant & Food Service", "Restaurant & Food Service"
+    if any(k in haystack for k in ("cleaning", "plumber", "plumbing", "electrician",
+                                     "hvac", "contractor", "handyman", "landscap",
+                                     "painter", "painting", "roofer", "roofing",
+                                     "pest control", "lawn care", "junk removal",
+                                     "moving service", "home service")):
+        return "Home Services & Trades", "Home Services & Trades"
+    if any(k in haystack for k in ("salon", "spa", "fitness", " gym ", "yoga",
+                                     "barber", "hair stylist", "nail salon", "massage",
+                                     "wellness", "esthetic", "beauty")):
+        return "Beauty & Wellness", "Beauty & Wellness"
+    if any(k in haystack for k in ("real estate", "realtor", "realty",
+                                     "property management", "mortgage broker")):
+        return "Real Estate", "Real Estate"
+    if any(k in haystack for k in ("retail", "ecommerce", "e-commerce", "shop ",
+                                     "boutique", "online store")):
+        return "Retail & E-commerce", "Retail & E-commerce"
+
+    # ── Brands, Founders & Entrepreneurs (specific self-identification) ──
+    if any(k in haystack for k in ("creator", "influencer", "personal brand",
+                                     "podcaster", "content creator", "youtuber")):
+        return "Personal Brand & Creator", "Personal Brand & Creator"
+    if any(k in haystack for k in ("coach", "speaker", "author", "keynote",
+                                     "thought leader", "mentor")):
+        return "Coach, Speaker & Author", "Coach, Speaker & Author"
+
+    # ── B2B & Service Companies ───────────────────────────────────
+    # Checked BEFORE the generic 'startup' fallback because consulting/SaaS
+    # firms whose target market is startups (e.g. 'we serve early-stage SaaS')
+    # should classify as Agency/SaaS, not Startup & Early-stage.
+    if any(k in haystack for k in ("saas", "software", " tech ", "developer",
+                                     "platform", " app ")):
+        return "SaaS & Tech", "SaaS & Tech"
+    if any(k in haystack for k in ("agency", "marketing services", "consulting",
+                                     "consultant", "fractional cmo", "solutions ")):
+        return "Agency & Consulting", "Agency & Consulting"
+    if any(k in haystack for k in ("nonprofit", "non-profit", "charity",
+                                     "foundation")):
         return "Non-profit & Cause", "Non-profit & Cause"
+    if any(k in haystack for k in ("b2b service", "professional services",
+                                     "business services")):
+        return "Professional B2B Services", "Professional B2B Services"
+
+    # ── Startup & Early-stage fallback ────────────────────────────
+    # Last so that consulting firms serving startups don't get misclassified
+    # just because 'startup' appears in their target market.
+    if any(k in haystack for k in ("startup", "founder", "early-stage", "early stage",
+                                     "pre-seed", "pre seed", "seed stage", "seed-stage",
+                                     "scaling executive", "scaling founder")):
+        return "Startup & Early-stage", "Startup & Early-stage"
+
     return "General Business", "Other"
 
 
@@ -401,7 +454,9 @@ def build_config_from_parsed(parsed: dict) -> ClientConfig:
         linktree_url = ""
 
     target_market   = parsed.get("target_market", "")
-    client_industry, industry_category = _infer_industry(target_market)
+    client_industry, industry_category = _infer_industry(
+        target_market, business_name=client_name, website_url=norm_url
+    )
 
     budget          = _parse_budget(parsed.get("monthly_ad_budget", "0"))
     list_size       = int(_parse_budget(parsed.get("email_list_size", "0")))
