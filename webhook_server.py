@@ -71,6 +71,8 @@ import time
 import traceback
 from datetime import datetime
 
+import requests  # admin notification SendGrid call (line ~1337)
+
 # ── Bootstrap path & env ──────────────────────────────────────────
 sys.path.insert(0, os.path.dirname(__file__))
 

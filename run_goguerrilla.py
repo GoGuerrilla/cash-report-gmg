@@ -341,11 +341,29 @@ def _merge_website_data(channel_data: dict, website_audit: dict, base_url: str =
     # keyword scan said no.
     site["apify_confirmed"]    = apify_confirmed
     site["apify_has_faqpage"]  = _apify_has_faqpage_schema()
+    # Log every Apify-enabled audit so we can confirm Push 4 is firing in prod.
+    # Detect "Apify ran" via presence of the apify_blog_posts key (set in
+    # website_auditor when USE_APIFY_CONTENT=1) OR any apify_* signals.
+    _apify_ran = (
+        "apify_blog_posts" in website_audit
+        or bool(apify_forms_all or apify_ctas_all or apify_schema_types)
+    )
+    if _apify_ran:
+        if apify_confirmed:
+            log.info(
+                "Apify sanity check upgraded %d signal(s) for %s: %s",
+                len(apify_confirmed), base_url, apify_confirmed,
+            )
+        else:
+            log.info(
+                "Apify sanity check ran for %s — 0 upgrades "
+                "(forms=%d ctas=%d schema_types=%d blog_posts=%d)",
+                base_url,
+                len(apify_forms_all), len(apify_ctas_all),
+                len(apify_schema_types), len(apify_blog_posts),
+            )
     if site["apify_has_faqpage"]:
         log.info("Apify confirmed FAQPage schema for %s", base_url)
-    if apify_confirmed:
-        log.info("Apify sanity check upgraded %d signal(s) for %s: %s",
-                 len(apify_confirmed), base_url, apify_confirmed)
 
 
 def run_audit():
