@@ -540,7 +540,10 @@ class PDFReportGenerator:
     def _overall_banner(self) -> str:
         score = self.cash["overall"]
         g     = self.ai.get("overall_grade", _grade(score))
-        desc  = (self.ai.get("executive_summary", "") or "")[:120].rstrip(".")
+        _raw = (self.ai.get("executive_summary", "") or "").strip()
+        if len(_raw) > 220:
+            _raw = _raw[:220].rsplit(" ", 1)[0].rstrip(",;:.- ") + "…"
+        desc = _raw
         return (f'<div class="overall-score-banner">'
                 f'<div class="osb-grade">'
                 f'<div class="osb-letter">{_h(g)}</div>'
