@@ -30,6 +30,15 @@ import os
 from typing import Dict, Any, List
 
 from config import ClientConfig
+from auditors.industry_benchmarks import (
+    industry_label,
+    get_primary_platforms,
+    get_recommended_platforms,
+    get_gbp_importance,
+    is_local_business,
+    is_b2b,
+    get_posting_benchmarks,
+)
 
 # Load .env automatically when this module is imported so callers don't have to
 try:
@@ -318,6 +327,73 @@ class AIAnalyzer:
         _mod_lines = "\n".join(f"  {n}" for n in _mods.get("notes", [])) or "  None"
         _flag_lines = "\n".join(f"  ⚠ {f}" for f in _mods.get("flags", [])) or "  None"
 
+        # Posting frequency map → human-readable lines (skip if empty)
+        _ppf = config.platform_posting_frequency or {}
+        if _ppf:
+            _ppf_lines = "\n".join(
+                f"  {plat}: {freq}/week" for plat, freq in _ppf.items()
+            )
+        else:
+            _ppf_lines = "  Not provided"
+
+        # Hourly rate: only surface if client supplied (0 means skip cost estimates)
+        if config.team_hourly_rate and config.team_hourly_rate > 0:
+            _rate_line = f"TEAM HOURLY RATE: ${config.team_hourly_rate:,.0f}/hr — use for concrete cost estimates."
+        else:
+            _rate_line = "TEAM HOURLY RATE: Not provided — do NOT include dollar-based time-cost estimates."
+
+        # Referral system: surface description only if both flag is true and text is provided
+        if config.has_referral_system and (config.referral_system_description or "").strip():
+            _referral_line = f"REFERRAL SYSTEM: Yes — {config.referral_system_description.strip()}"
+        elif config.has_referral_system:
+            _referral_line = "REFERRAL SYSTEM: Yes (no description provided)"
+        else:
+            _referral_line = f"REFERRAL SYSTEM: {_u(config.has_referral_system, False)}"
+
+        # Industry-specific guidance from auditors/industry_benchmarks.py.
+        # Falls back to "Other" with explicit guard so Claude does not fabricate
+        # industry claims when classification is missing.
+        _ind_canon = industry_label(config.industry_category or config.client_industry)
+        if _ind_canon == "Other":
+            _industry_block = (
+                "INDUSTRY GUIDANCE: Industry could not be classified to a "
+                "canonical category. Do NOT make industry-specific claims "
+                "(e.g. 'most law firms…', 'in restaurants…'). Use the "
+                "client's stated_target_market and observable signals only."
+            )
+        else:
+            _primary    = get_primary_platforms(_ind_canon) or []
+            _recommend  = get_recommended_platforms(_ind_canon) or []
+            _gbp_note   = get_gbp_importance(_ind_canon)
+            _local_flag = "Yes" if is_local_business(_ind_canon) else "No"
+            _b2b_flag   = "Yes" if is_b2b(_ind_canon) else "No"
+
+            # Posting targets only for the channels the client is actually on
+            _post_lines = []
+            for plat in (channels or []):
+                bm = get_posting_benchmarks(plat, _ind_canon) or {}
+                if bm:
+                    _post_lines.append(
+                        f"  {plat}: min {bm.get('min','?')}, "
+                        f"ideal {bm.get('ideal','?')}, "
+                        f"max {bm.get('max','?')} posts/week"
+                    )
+            _post_block = "\n".join(_post_lines) if _post_lines else "  (no active channels)"
+
+            _industry_block = (
+                f"INDUSTRY GUIDANCE (canonical: {_ind_canon}):\n"
+                f"  PRIMARY PLATFORMS (absence is CRITICAL): "
+                f"{', '.join(_primary) if _primary else 'None defined'}\n"
+                f"  RECOMMENDED PLATFORMS (absence is a warning): "
+                f"{', '.join(_recommend) if _recommend else 'None defined'}\n"
+                f"  GOOGLE BUSINESS PROFILE IMPORTANCE: {_gbp_note}\n"
+                f"  LOCAL BUSINESS: {_local_flag}  |  B2B FOCUS: {_b2b_flag}\n"
+                f"  POSTING TARGETS for active channels:\n{_post_block}\n"
+                f"  Use these benchmarks for cadence recommendations. Do NOT "
+                f"recommend a primary platform the client is already on at "
+                f"or above 'ideal' cadence — recommend optimization instead."
+            )
+
         if config.intake_completed:
             _intake_directive = (
                 "INTAKE COMPLETED: True — full client context available. "
@@ -360,10 +436,16 @@ INDUSTRY CATEGORY: {config.industry_category or "Other"}
 CLIENT CATEGORY: {config.client_category or "Not provided"}
 AUDIT SOURCE: {getattr(config, 'audit_source', 'full_intake')}
 {_intake_directive}
+
+PRIMARY FRAMING — BIGGEST MARKETING CHALLENGE: {config.biggest_marketing_challenge or "Not provided"}
+The executive_summary AND biggest_opportunity fields below MUST directly address this challenge. Do not produce generic findings that ignore it. If "Not provided", anchor on the lowest C.A.S.H. component instead.
+
 GROWTH TIER: {_classify_growth_tier(config, audit_data)} — calibrate recommendation tone and type to this stage. early = foundational ("build the basics before optimizing"); growing = optimize-and-scale; established = refine-and-defend. Do not recommend establishing what already exists, and do not recommend optimizing what hasn't been built yet.
+
+{_industry_block}
+
 STATED TARGET MARKET: {config.stated_target_market or "Not provided"}
 STATED ICP INDUSTRY: {config.stated_icp_industry or "Not provided"}
-BIGGEST CHALLENGE: {config.biggest_marketing_challenge or "Not provided"}
 INTAKE SCORE MODIFIERS APPLIED:
 {_mod_lines}
 INTAKE FLAGS:
@@ -372,10 +454,15 @@ STATED VALUE PROP: {config.stated_value_prop or "Not provided"}
 PRIMARY GOAL: {config.primary_goal}
 MONTHLY AD BUDGET: ${config.monthly_ad_budget:,.0f}
 TEAM SIZE: {_u(config.team_size, 1)}
+{_rate_line}
 ACTIVE CHANNELS: {', '.join(channels) if channels else 'None'}
+PLATFORM POSTING FREQUENCY (client-stated, posts/week):
+{_ppf_lines}
 EMAIL LIST: {config.email_list_size:,} contacts
 HAS NEWSLETTER: {config.has_active_newsletter}
-HAS REFERRAL SYSTEM: {_u(config.has_referral_system, False)}
+EMAIL SEND FREQUENCY: {config.email_send_frequency or "Not provided"}
+HAS BULK EMAIL MARKETING: {_u(config.has_email_marketing, False)}
+{_referral_line}
 HAS LEAD MAGNET: {_u(config.has_lead_magnet, False)}
 BOOKING TOOL: {config.booking_tool if config.booking_tool else "None (unverified — not in intake form)"}
 CURRENT CLIENTS: {_u(config.current_client_count, 0)} ({config.current_client_types or "unverified — not in intake form"})
