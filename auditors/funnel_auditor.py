@@ -270,8 +270,8 @@ class FunnelAuditor:
             strengths.append("✅ Marketing certifications/credentials displayed.")
         else:
             issues.append(
-                "🟡 No certifications displayed. Google Partner, HubSpot, or "
-                "financial industry credentials build trust with regulated professionals."
+                "🟡 No certifications displayed. Industry credentials, partner badges, "
+                "or category-relevant accreditations build trust — surface any you hold."
             )
 
         if has_client_logos:
@@ -356,7 +356,7 @@ class FunnelAuditor:
             {
                 "priority": "MEDIUM",
                 "action": "Add visible pricing or 'starting from' range",
-                "example": "Content marketing packages from $1,500/month",
+                "example": "e.g. 'Starting from $X/month' or '$X–$Y per project' — even a range builds trust.",
                 "timeline": "1 week",
                 "impact": "Pre-qualifies leads and reduces friction with detail-oriented buyers"
             },
