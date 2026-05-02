@@ -127,6 +127,12 @@ def _merge_website_data(channel_data: dict, website_audit: dict, base_url: str =
     WebsiteAuditor returns: url, status, homepage (page analysis dict),
     pages (list), scores (dict), issues, strengths.
     We derive boolean flags from the live homepage text analysis.
+
+    Push 4 (Apify sanity check): when Apify rich fields are present on pages
+    (apify_forms, apify_ctas, apify_structured_data) and blog_posts metadata
+    is attached, positive Apify evidence overrides keyword false negatives.
+    Negative Apify evidence is NOT trusted — Apify may simply not have crawled
+    the relevant page.
     """
     if website_audit.get("status") not in ("ok",):
         return  # Crawl failed — keep None placeholders
@@ -135,6 +141,58 @@ def _merge_website_data(channel_data: dict, website_audit: dict, base_url: str =
     pages        = website_audit.get("pages", [])
     page_urls_lc = [p.get("url", "").lower() for p in pages]
     site         = channel_data["website"]
+
+    # ── Apify rich-signal aggregation (Push 4) ─────────────────────
+    # When USE_APIFY_CONTENT is on, each page carries forms, ctas, and
+    # structured_data. These are stronger signals than text keyword scans,
+    # so positive evidence here overrides keyword-detector false negatives.
+    apify_forms_all:    list = []
+    apify_ctas_all:     list = []
+    apify_schema_types: list = []
+    for p in pages:
+        apify_forms_all.extend(p.get("apify_forms",   []) or [])
+        apify_ctas_all.extend(p.get("apify_ctas",    []) or [])
+        for sd in (p.get("apify_structured_data", []) or []):
+            t = sd.get("@type") if isinstance(sd, dict) else None
+            if isinstance(t, str):
+                apify_schema_types.append(t.lower())
+            elif isinstance(t, list):
+                apify_schema_types.extend(str(x).lower() for x in t if x)
+
+    apify_blog_posts = website_audit.get("apify_blog_posts", []) or []
+
+    def _apify_has_review_schema() -> bool:
+        return any(t in ("review", "aggregaterating") for t in apify_schema_types)
+
+    def _apify_has_casestudy_schema() -> bool:
+        return any(t in ("casestudy", "case_study") for t in apify_schema_types)
+
+    def _apify_has_faqpage_schema() -> bool:
+        return any(t == "faqpage" for t in apify_schema_types)
+
+    def _apify_has_form_type(target: str) -> bool:
+        return any((f.get("form_type") or "").lower() == target for f in apify_forms_all)
+
+    def _apify_has_recent_blog(days: int = 180) -> bool:
+        if not apify_blog_posts:
+            return False
+        from datetime import datetime, timezone, timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        for post in apify_blog_posts:
+            pub = post.get("published")
+            if not pub:
+                continue
+            try:
+                d = datetime.fromisoformat(str(pub).replace("Z", "+00:00"))
+                if d.tzinfo is None:
+                    d = d.replace(tzinfo=timezone.utc)
+                if d > cutoff:
+                    return True
+            except Exception:
+                continue
+        return False
+
+    apify_confirmed: list = []  # Signals Apify upgraded over keyword scan
 
     # Pull homepage-level structural signals added by WebsiteAuditor
     hp_lead_magnet_url = homepage.get("lead_magnet_url")
@@ -157,59 +215,97 @@ def _merge_website_data(channel_data: dict, website_audit: dict, base_url: str =
         return any(kw in all_text for kw in keywords)
 
     # Derive boolean flags from crawled content
-    # Lead magnet: link href match is authoritative; keyword scan is fallback
-    site["has_lead_magnet"] = bool(
+    # Lead magnet: link href match is authoritative; keyword scan is fallback;
+    # Apify opt-in form is positive evidence (lead magnets typically capture via opt-in form).
+    _kw_lead_magnet = bool(
         hp_lead_magnet_url
         or _has("free guide", "free download", "lead magnet",
                 "free ebook", "free resource", "free checklist",
                 "cash report", "cash-report")
     )
+    _apify_lead_magnet = _apify_has_form_type("optin")
+    site["has_lead_magnet"] = _kw_lead_magnet or _apify_lead_magnet
+    if _apify_lead_magnet and not _kw_lead_magnet:
+        apify_confirmed.append("lead_magnet — Apify detected an opt-in form")
     if hp_lead_magnet_url:
         log.info("Lead magnet scan: found=%s  cta=%r", hp_lead_magnet_url, hp_lead_magnet_cta)
     else:
         log.info("Lead magnet scan: none detected  has_form=%s  has_iframe=%s  iframes=%s",
                  hp_has_form, hp_has_iframe, hp_iframe_sources or "[]")
 
-    # Email opt-in: also flag if a form or iframe exists on homepage
-    site["has_email_optin"] = (
+    # Email opt-in: keyword + on-page form/iframe + Apify-classified opt-in form
+    _kw_email_optin = (
         _has("subscribe", "sign up", "opt in", "opt-in", "join our list", "get updates")
         or hp_has_form
         or hp_has_iframe
         or homepage.get("has_email_visible", False)
     )
-    # Contact form: also flag explicit <form> elements
-    site["has_contact_form"] = (
+    _apify_email_optin = _apify_has_form_type("optin")
+    site["has_email_optin"] = _kw_email_optin or _apify_email_optin
+    if _apify_email_optin and not _kw_email_optin:
+        apify_confirmed.append("email_optin — Apify saw classified opt-in form")
+
+    # Contact form: keyword + on-page <form> + Apify-classified contact form
+    _kw_contact_form = (
         _has("contact us", "get in touch", "send a message", "contact form", "reach out")
         or hp_has_form
     )
+    _apify_contact_form = _apify_has_form_type("contact")
+    site["has_contact_form"] = _kw_contact_form or _apify_contact_form
+    if _apify_contact_form and not _kw_contact_form:
+        apify_confirmed.append("contact_form — Apify saw classified contact form")
+
     site["has_newsletter"]    = _has("newsletter", "weekly email", "biweekly",
                                       "subscribe to our")
-    # Blog: URL slug check is reliable even on Wix (crawled nav page URLs don't require JS)
+    # Blog: URL slug + keyword + Apify blog_posts list (positive evidence)
     _blog_slugs = ("/blog", "/articles", "/news", "/posts", "/marketing-insights",
                    "/insights", "/resources", "/content")
-    site["has_blog"] = (
+    _kw_blog = (
         any(slug in url for url in page_urls_lc for slug in _blog_slugs)
         or _has("blog", "article", "post", "read more", "latest news")
     )
+    _apify_blog = bool(apify_blog_posts)
+    site["has_blog"] = _kw_blog or _apify_blog
+    if _apify_blog and not _kw_blog:
+        apify_confirmed.append(f"blog — Apify found {len(apify_blog_posts)} blog post(s)")
+    # Recent blog activity (only when Apify ran — keyword scan can't tell)
+    if _apify_has_recent_blog(180):
+        site["has_recent_blog"] = True
+    elif apify_blog_posts:
+        site["has_recent_blog"] = False  # Apify ran, no recent post
+    # else leave unset — unknown without Apify
+
     site["has_podcast"]       = _has("podcast", "listen", "episode", "spotify")
     site["has_pricing"]       = _has("pricing", "price", "per month", "/month",
                                       "starting at", "packages")
-    site["has_case_studies"]  = _has("case study", "case studies", "success story",
-                                      "client results", "how we helped")
+
+    # Case studies: keyword + Apify CaseStudy schema (positive evidence)
+    _kw_case_studies = _has("case study", "case studies", "success story",
+                              "client results", "how we helped")
+    _apify_case_studies = _apify_has_casestudy_schema()
+    site["has_case_studies"] = _kw_case_studies or _apify_case_studies
+    if _apify_case_studies and not _kw_case_studies:
+        apify_confirmed.append("case_studies — Apify saw CaseStudy schema")
+
     site["has_proposal_cta"]  = _has("get a proposal", "free audit", "free consultation",
                                       "request a quote", "book a call")
     site["has_free_trial"]    = _has("free trial", "try for free", "start free")
-    # Testimonials: schema markup and URL slugs are reliable on Wix (JS widgets invisible to text scan)
+
+    # Testimonials: schema markup, URL slugs, keywords, AND Apify Review schema
     hp_schema_lc = [s.lower() for s in homepage.get("schema_types", [])]
     _review_slugs = ("/testimonials", "/reviews", "/results", "/success-stories",
                      "/case-studies", "/clients", "/portfolio")
-    site["has_testimonials"] = (
+    _kw_testimonials = (
         any(s in hp_schema_lc for s in ("review", "aggregaterating"))
         or any(slug in url for url in page_urls_lc for slug in _review_slugs)
         or _has("testimonial", "review", "what our clients", "what clients are saying",
                 "what our clients are saying", "client testimonials", "hear from our clients",
                 "happy clients", "client reviews", "client stories", "five star", "★", "⭐")
     )
+    _apify_testimonials = _apify_has_review_schema()
+    site["has_testimonials"] = _kw_testimonials or _apify_testimonials
+    if _apify_testimonials and not _kw_testimonials:
+        apify_confirmed.append("testimonials — Apify saw Review/AggregateRating schema")
     site["has_certifications"] = _has("certified", "certification", "google partner",
                                        "hubspot", "credential")
     site["has_media_mentions"] = _has("featured in", "as seen in", "press", "media")
@@ -238,6 +334,18 @@ def _merge_website_data(channel_data: dict, website_audit: dict, base_url: str =
 
     # Platform detected by WebsiteAuditor during homepage parse
     site["platform"] = (website_audit.get("platform") or "unknown").lower()
+
+    # Push 4 — Apify second-pass evidence summary.
+    # AI synthesis can reference this list to qualify findings ("verified via
+    # second-pass crawl") and avoid hard-claiming absence when only the
+    # keyword scan said no.
+    site["apify_confirmed"]    = apify_confirmed
+    site["apify_has_faqpage"]  = _apify_has_faqpage_schema()
+    if site["apify_has_faqpage"]:
+        log.info("Apify confirmed FAQPage schema for %s", base_url)
+    if apify_confirmed:
+        log.info("Apify sanity check upgraded %d signal(s) for %s: %s",
+                 len(apify_confirmed), base_url, apify_confirmed)
 
 
 def run_audit():

@@ -170,6 +170,11 @@ def _adapt_apify_to_pages(apify_result: dict) -> List[Dict]:
             "form_count":              len(forms),
             "has_iframe":              False,
             "iframe_sources":          [],
+            # Apify-rich fields preserved for Push 4 sanity check —
+            # downstream consumers use these to override keyword false negatives.
+            "apify_forms":             forms,
+            "apify_ctas":              ctas,
+            "apify_structured_data":   struct,
         })
 
     return adapted
@@ -217,6 +222,9 @@ class WebsiteAuditor:
             apify_result  = apify_content.fetch(self.base_url)
             self.platform = (apify_result.get("platform_hints") or ["unknown"])[0]
             pages_data    = _adapt_apify_to_pages(apify_result)
+            # Push 4 sanity check — preserve blog_posts (with published dates)
+            # so _merge_website_data can verify blog freshness against keyword scan.
+            results["apify_blog_posts"] = apify_result.get("blog_posts", [])
             log.info(
                 "[APIFY_CONTENT_ON] base_url=%s pages=%d blog_posts=%d "
                 "platform_hints=%s data_source=apify_content_crawler",
