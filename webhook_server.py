@@ -348,17 +348,33 @@ def _parse_email_freq(raw: str):
     return raw.strip(), bool(raw.strip()), bool(raw.strip())
 
 
-def _infer_industry(target_market: str, business_name: str = "", website_url: str = "") -> tuple:
+def _infer_industry(
+    target_market: str,
+    business_name: str = "",
+    website_url: str = "",
+    extra_signal: str = "",
+) -> tuple:
     """
     Return (client_industry, industry_category) from target-market text +
-    business name + website URL. Falls back to 'General' / 'Other'.
+    business name + website URL + optional extra signal. Falls back to
+    'General' / 'Other'.
 
     Uses a concatenated haystack so a cleaning service named 'Orchard Cleaning
     Services' classifies correctly even if the buyer description doesn't mention
     cleaning. Checks are ordered from most-specific to most-general so that, e.g.,
     'Financial Advisory' wins over the generic 'Professional B2B Services' bucket.
+
+    extra_signal is for audit-time re-classification: caller passes homepage
+    title/meta_description/h1/page-slugs scraped during the website audit so a
+    business with a generic name (e.g. 'GMG' / 'gogmg.net') still classifies
+    correctly using its own SEO copy.
     """
-    haystack = " ".join([target_market or "", business_name or "", website_url or ""]).lower()
+    haystack = " ".join([
+        target_market or "",
+        business_name or "",
+        website_url or "",
+        extra_signal or "",
+    ]).lower()
 
     # ── Professional Services (canonical sub-buckets) ─────────────
     # 'ria firm' and 'ria advisor' (not bare 'ria') because 'ria' as a substring
@@ -402,8 +418,13 @@ def _infer_industry(target_market: str, business_name: str = "", website_url: st
     if any(k in haystack for k in ("creator", "influencer", "personal brand",
                                      "podcaster", "content creator", "youtuber")):
         return "Personal Brand & Creator", "Personal Brand & Creator"
-    if any(k in haystack for k in ("coach", "speaker", "author", "keynote",
-                                     "thought leader", "mentor")):
+    # 'author' alone false-positives on 'authority' (common in marketing copy);
+    # require multi-word forms instead.
+    if any(k in haystack for k in ("coach", "speaker", "keynote",
+                                     "thought leader", "mentor",
+                                     "book author", "published author",
+                                     "author of", "speaker and author",
+                                     "speaker & author")):
         return "Coach, Speaker & Author", "Coach, Speaker & Author"
 
     # ── B2B & Service Companies ───────────────────────────────────
@@ -414,7 +435,12 @@ def _infer_industry(target_market: str, business_name: str = "", website_url: st
                                      "platform", " app ")):
         return "SaaS & Tech", "SaaS & Tech"
     if any(k in haystack for k in ("agency", "marketing services", "consulting",
-                                     "consultant", "fractional cmo", "solutions ")):
+                                     "consultant", "fractional cmo", "solutions ",
+                                     "marketing group", "marketing agency",
+                                     "creative studio", "branding agency",
+                                     "digital agency", "growth agency",
+                                     "marketing solutions", "advertising agency",
+                                     "pr firm", "public relations")):
         return "Agency & Consulting", "Agency & Consulting"
     if any(k in haystack for k in ("nonprofit", "non-profit", "charity",
                                      "foundation")):
@@ -432,6 +458,31 @@ def _infer_industry(target_market: str, business_name: str = "", website_url: st
         return "Startup & Early-stage", "Startup & Early-stage"
 
     return "General Business", "Other"
+
+
+def _audit_signal_haystack(audit_data: dict) -> str:
+    """
+    Build an extra industry-classification signal from website audit data.
+
+    Concatenates homepage title + meta_description + h1 text + first 5 page
+    URLs (slugs are useful — '/wealth-management', '/cleaning-services').
+    Used to re-classify clients whose intake fields gave 'Other' but whose
+    website copy clearly identifies the category.
+    """
+    site = (audit_data or {}).get("website", {}) or {}
+    homepage = site.get("homepage", {}) or {}
+    pages = site.get("pages", []) or []
+
+    parts = [
+        homepage.get("title", "") or "",
+        homepage.get("meta_description", "") or "",
+        " ".join(homepage.get("h1_text", []) or []),
+    ]
+    for p in pages[:5]:
+        url = p.get("url") if isinstance(p, dict) else (p if isinstance(p, str) else "")
+        if url:
+            parts.append(url)
+    return " ".join(s for s in parts if s)
 
 
 def build_config_from_parsed(parsed: dict) -> ClientConfig:
@@ -1017,6 +1068,30 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
             log.info("JS render override complete: upgraded=%s  platform=%r", upgraded, platform)
 
         _merge_website_data(channel_data, audit_data["website"])
+
+        # Push 6 Stage 1 — re-classify industry using audit-time SEO signals
+        # when intake-time inference fell to 'Other'. Homepage title, meta, h1,
+        # and page slugs often carry clear category cues (e.g. 'Strategic
+        # Marketing Solutions | GMG' resolves to Agency & Consulting) that
+        # generic business names + URLs miss.
+        if (config.industry_category or "Other") == "Other":
+            _extra = _audit_signal_haystack(audit_data)
+            if _extra:
+                _new_industry, _new_category = _infer_industry(
+                    config.stated_target_market or "",
+                    business_name=config.client_name or "",
+                    website_url=config.website_url or "",
+                    extra_signal=_extra,
+                )
+                if _new_category != "Other":
+                    log.info(
+                        "Industry reclassified post-audit via SEO signals: "
+                        "'%s' / '%s' → '%s' / '%s' (extra_signal=%r)",
+                        config.client_industry, config.industry_category,
+                        _new_industry, _new_category, _extra[:120],
+                    )
+                    config.client_industry   = _new_industry
+                    config.industry_category = _new_category
 
         # GEO depends on SEO output — runs after Phase 2 completes
         _t = time.time()
