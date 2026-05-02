@@ -170,22 +170,31 @@ class BrandAuditor:
         elif found_edgy:
             strengths.append(f"✅ Distinctive brand voice: {', '.join(found_edgy)}.")
 
-        # Check if LinkedIn content aligns with the stated ICP
-        financial_topics = ["financial advisor", "cpa", "ria", "wealth management",
-                            "tax planning", "compliance", "fiduciary", "advisor marketing",
-                            "attorney", "law firm", "legal marketing", "fractional cfo",
-                            "fractional cmo", "professional services"]
-        if linkedin_topics:
+        # LinkedIn content alignment with stated ICP — only run when the stated
+        # ICP is B2B/professional-services (otherwise this check produces false
+        # negatives for clients in other industries).
+        is_b2b_financial = (
+            "financial" in stated_market or "cpa" in stated_market
+            or "advisor" in stated_market or "attorney" in stated_market
+            or "law firm" in stated_market or "fractional" in stated_market
+        )
+        if is_b2b_financial and linkedin_topics:
+            financial_topics = ["financial advisor", "cpa", "ria", "wealth management",
+                                "tax planning", "compliance", "fiduciary", "advisor marketing",
+                                "attorney", "law firm", "legal marketing", "fractional cfo",
+                                "fractional cmo", "professional services"]
             icp_aligned = [t for t in linkedin_topics if
                            any(f in t.lower() for f in financial_topics)]
             if not icp_aligned:
                 issues.append(
-                    "🔴 LinkedIn content topics show NO financial services content. "
-                    "Posting about general marketing (repurposing, systems, community) "
-                    "to a financial advisors, CPAs, and attorneys audience misses the mark on relevance."
+                    "🔴 LinkedIn content topics show no overlap with the stated B2B "
+                    "financial-services ICP. Posting general marketing content to "
+                    "an audience of advisors, CPAs, and attorneys misses on relevance."
                 )
             else:
-                strengths.append(f"✅ LinkedIn touches professional services ICP topics: {', '.join(icp_aligned[:3])}")
+                strengths.append(
+                    f"✅ LinkedIn touches stated ICP topics: {', '.join(icp_aligned[:3])}"
+                )
 
         return {"issues": issues, "strengths": strengths}
 
@@ -213,10 +222,16 @@ class BrandAuditor:
         if medium_fit:
             issues.append(f"🟡 Medium-fit platforms (use sparingly): {', '.join(medium_fit)}")
         if low_fit:
-            issues.append(
-                f"🔴 Low-fit platforms for B2B financial services: {', '.join(low_fit)}. "
-                f"Time spent here is mostly wasted when targeting financial advisors, CPAs, attorneys, and law firms."
-            )
+            if is_b2b_financial:
+                issues.append(
+                    f"🔴 Low-fit platforms for B2B financial services: {', '.join(low_fit)}. "
+                    f"Time spent here is mostly wasted when targeting advisors, CPAs, attorneys, and law firms."
+                )
+            else:
+                issues.append(
+                    f"🔴 Low-fit platforms for the stated target market: {', '.join(low_fit)}. "
+                    f"Time invested here is mostly lost when the buyer rarely uses these channels."
+                )
 
         # Discord specifically
         if "Discord" in platforms and is_b2b_financial:
@@ -262,7 +277,7 @@ class BrandAuditor:
         if not has_testimonials and not has_case_studies:
             issues.append(
                 "🔴 No testimonials or case studies visible in public content. "
-                "Financial advisors, CPAs, and attorneys require strong social proof before engaging a vendor."
+                "B2B and high-consideration buyers require strong social proof before engaging a vendor."
             )
 
         return {"issues": issues, "strengths": strengths}
@@ -324,30 +339,52 @@ class BrandAuditor:
 
     def _recommendations(self, platform_fit: Dict, bio_analysis: Dict) -> List[Dict]:
         recs = []
+        stated_market = (self.config.stated_target_market or "").lower()
+        is_b2b_financial = (
+            "financial" in stated_market or "cpa" in stated_market
+            or "advisor" in stated_market or "attorney" in stated_market
+            or "law firm" in stated_market or "fractional" in stated_market
+        )
+
         low_fit = platform_fit.get("low_fit", [])
         if low_fit:
             recs.append({
                 "priority": "HIGH",
                 "action": f"Pause or deprioritize: {', '.join(low_fit)}",
-                "reason": "These platforms have near-zero overlap with financial advisors, CPAs, attorneys, and law firms.",
-                "impact": "Recover 5-10 hours/week to invest in LinkedIn and email."
+                "reason": "These platforms have near-zero overlap with the stated target market.",
+                "impact": "Recover hours/week to redirect into higher-fit channels.",
             })
-        recs.append({
-            "priority": "HIGH",
-            "action": "Rewrite Linktree bio to speak directly to financial advisors, CPAs, attorneys, and law firms",
-            "reason": "First touchpoint must immediately signal relevance to the ICP.",
-            "impact": "Higher link-click conversion from the right audience."
-        })
-        recs.append({
-            "priority": "HIGH",
-            "action": "Remove or reframe Web3/NFT/Blockchain language from all public copy",
-            "reason": "FINRA/SEC-regulated advisors are risk-averse; crypto-adjacent language triggers compliance red flags.",
-            "impact": "Removes a major credibility barrier with the target ICP."
-        })
+        if self.config.stated_target_market:
+            recs.append({
+                "priority": "HIGH",
+                "action": (
+                    "Rewrite Linktree bio to speak directly to "
+                    f"'{self.config.stated_target_market}'"
+                ),
+                "reason": "First touchpoint must immediately signal relevance to the stated ICP.",
+                "impact": "Higher link-click conversion from the right audience.",
+            })
+        else:
+            recs.append({
+                "priority": "HIGH",
+                "action": "Define a stated target market and rewrite Linktree bio to speak to it directly",
+                "reason": "First touchpoint must signal relevance, but no ICP is currently stated.",
+                "impact": "Higher link-click conversion from the right audience once defined.",
+            })
+
+        # Compliance-language warning is only meaningful for regulated B2B financial-services clients.
+        if is_b2b_financial:
+            recs.append({
+                "priority": "HIGH",
+                "action": "Remove or reframe Web3/NFT/Blockchain language from all public copy",
+                "reason": "FINRA/SEC-regulated advisors are risk-averse; crypto-adjacent language triggers compliance red flags.",
+                "impact": "Removes a major credibility barrier with the target ICP.",
+            })
+
         recs.append({
             "priority": "MEDIUM",
             "action": "Standardize social handles to one consistent format",
-            "reason": "go.guerrilla vs GoGuerrillaX vs GuerrillaMarketingGroup creates confusion.",
-            "impact": "Easier cross-platform discovery and tagging."
+            "reason": "Inconsistent handles across platforms hurt cross-platform discovery and tagging.",
+            "impact": "Easier brand search, tagging, and cross-channel attribution.",
         })
         return recs

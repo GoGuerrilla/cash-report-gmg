@@ -689,9 +689,11 @@ class GEOAuditor:
         else:
             score = 30
             issues.append("🟡 No blog and no FAQ page — AI systems have little Q&A content to cite")
+            _icp = self.config.stated_target_market or "your ICP"
             issues.append(
-                "🟡 Create a FAQ page answering: 'What does a fractional CMO do for financial advisors "
-                "and CPAs?', 'How do law firms find more clients?', 'What is marketing ROI for professional services?'"
+                f"🟡 Create a FAQ page answering the questions {_icp} actually asks "
+                f"before buying: pricing, scope, timeline, comparison vs alternatives, "
+                f"and outcome examples. Use the exact words from sales calls."
             )
 
         return {
@@ -748,7 +750,10 @@ class GEOAuditor:
         if signals.get("media_mentions"):
             strengths.append("✅ Media mentions present — strong authority signal")
         else:
-            issues.append("🟡 No media mentions — pursue guest articles on financial advisor, CPA, and legal publications")
+            issues.append(
+                "🟡 No media mentions — pursue guest articles in trade publications, "
+                "podcasts, or industry blogs that your ICP actually reads."
+            )
 
         if signals.get("client_logos"):
             strengths.append("✅ Client logos displayed — social proof for AI trust scoring")
@@ -870,10 +875,11 @@ class GEOAuditor:
         serp_ok    = components["SERP Visibility"]["status"] == "pass"
         onpage_ok  = components["On-page SEO"]["status"] == "pass"
 
+        _icp = self.config.stated_target_market or "your ICP"
         chatgpt = (
-            "Likely to appear when users ask about marketing for financial advisors and CPAs — "
-            "brand is indexed and has some structured signals. Add FAQPage schema + case studies "
-            "to increase citation frequency."
+            f"Likely to appear when users ask about your category for {_icp} — "
+            f"brand is indexed and has some structured signals. Add FAQPage schema + case studies "
+            f"to increase citation frequency."
             if citation_s >= 55 else
             "Unlikely to appear — ChatGPT pulls from indexed, structured content. "
             "Add schema, FAQ page, and Q&A blog posts targeting your ICP's exact questions."
@@ -886,11 +892,11 @@ class GEOAuditor:
             "Priority: add Organization + FAQPage schema and at least 2 E-E-A-T trust signals."
         )
         perplexity = (
-            "Moderate Perplexity citation potential — E-E-A-T signals detected. "
-            "Publish 2–3 long-form pieces on fractional CMO for financial advisors to build topic authority."
+            f"Moderate Perplexity citation potential — E-E-A-T signals detected. "
+            f"Publish 2–3 long-form pieces on your category for {_icp} to build topic authority."
             if eeat_ok else
             "Low Perplexity citation likelihood — insufficient topical authority. "
-            "Publish case studies and guest posts on financial advisor, CPA, and legal publications."
+            "Publish case studies and guest posts in trade publications and industry blogs your ICP reads."
         )
         serp_note = (
             "Ranking keywords verified in Search Console — focus on moving page-2 keywords to page 1."
@@ -921,19 +927,24 @@ class GEOAuditor:
         onpage_det   = components["On-page SEO"]
         serp_det     = components["SERP Visibility"]
 
+        # ICP placeholder for example-detail strings — falls back to neutral phrasing
+        # when no stated_target_market is provided.
+        icp = self.config.stated_target_market or "your ICP"
+        client_name = self.config.client_name or "your business"
+
         # On-page quick wins
         if not onpage_det.get("title"):
             recs.append({
                 "priority": "CRITICAL", "timeline": "Today",
                 "action":   "Add a keyword-rich title tag to the homepage",
-                "detail":   "Format: 'Fractional CMO for Financial Advisors & CPAs | Guerrilla Marketing Group' — include ICP language.",
+                "detail":   f"Format: '[Service] for {icp} | {client_name}' — include the ICP language your buyers actually use.",
                 "impact":   "Title tag is the #1 on-page ranking factor for Google and AI indexers",
             })
         elif onpage_score < 65:
             recs.append({
                 "priority": "HIGH", "timeline": "This week",
                 "action":   "Rewrite title tag and meta description to include ICP keywords",
-                "detail":   f"Current title: '{onpage_det.get('title','')[:60]}'. Update to include: financial advisors, CPAs, attorneys, fractional CMO.",
+                "detail":   f"Current title: '{onpage_det.get('title','')[:60]}'. Update to include keywords {icp} actually searches for.",
                 "impact":   "Keyword-aligned title/meta boosts CTR and AI summary accuracy",
             })
 
@@ -941,7 +952,7 @@ class GEOAuditor:
             recs.append({
                 "priority": "HIGH", "timeline": "Today",
                 "action":   "Add a meta description to the homepage",
-                "detail":   "Write 140–160 chars that include your ICP, value prop, and a CTA. Example: 'GMG provides fractional CMO services for financial advisors, CPAs, and law firms. Get a 90-day growth plan.'",
+                "detail":   f"Write 140–160 chars that include your ICP ({icp}), value prop, and a CTA. End with the next-step action.",
                 "impact":   "Meta description directly affects click-through rate from Google SERPs",
             })
 
@@ -949,7 +960,7 @@ class GEOAuditor:
             recs.append({
                 "priority": "HIGH", "timeline": "1–2 days",
                 "action":   "Add FAQPage JSON-LD schema to homepage or FAQ page",
-                "detail":   "Include 5–8 questions your ICP actually asks: 'What does a fractional CMO do?', 'How do financial advisors get more referrals?', 'What is the ROI of marketing for CPAs?'",
+                "detail":   f"Include 5–8 questions {icp} actually asks before buying: pricing, scope, timeline, comparison vs alternatives, and outcomes.",
                 "impact":   "FAQPage schema is the single highest-leverage action for Google AI Overview inclusion",
             })
 
@@ -965,7 +976,7 @@ class GEOAuditor:
             recs.append({
                 "priority": "HIGH", "timeline": "1 week",
                 "action":   "Create a dedicated FAQ page targeting ICP search queries",
-                "detail":   "Answer: 'What does GMG do for financial advisors?', 'How does a fractional CMO help CPAs?', 'What is the cost of fractional CMO services?' Use FAQPage schema.",
+                "detail":   f"Answer the questions {icp} actually asks before buying: what does this cost, what's the process, how long does it take, what's included, what makes you different. Use FAQPage schema.",
                 "impact":   "Q&A is the #1 content format AI systems extract for answer generation",
             })
 
@@ -973,7 +984,7 @@ class GEOAuditor:
             recs.append({
                 "priority": "HIGH", "timeline": "2–3 weeks",
                 "action":   "Add testimonials, case studies, and credentials to site",
-                "detail":   "Collect 3 client quotes (2 sentences each). Write 1 case study: 'How GMG grew [client] LinkedIn to X followers.' Display any certifications, awards, or media features.",
+                "detail":   f"Collect 3 client quotes (2 sentences each). Write 1 case study: 'How {client_name} helped [client] achieve [outcome].' Display any certifications, awards, or media features.",
                 "impact":   "E-E-A-T is Google AI Overview's primary source-quality filter",
             })
 
@@ -982,15 +993,15 @@ class GEOAuditor:
             recs.append({
                 "priority": "MEDIUM", "timeline": "30–60 days",
                 "action":   "Build topical content around ICP search queries",
-                "detail":   "Publish 4–6 blog posts targeting: 'marketing for financial advisors', 'how CPAs get referrals', 'fractional CMO cost', 'law firm marketing strategy'. 800–1,200 words each.",
+                "detail":   f"Publish 4–6 blog posts targeting the queries {icp} types into Google: pricing, vendor comparisons, how-to guides, and category overviews. 800–1,200 words each.",
                 "impact":   "Topical authority is the primary driver of non-branded keyword rankings and AI citation",
             })
 
         if auth_score < 65:
             recs.append({
                 "priority": "MEDIUM", "timeline": "1–2 months",
-                "action":   "Publish guest content on financial advisor, CPA, and legal platforms",
-                "detail":   "Targets: FA Magazine, Investment Advisor, XY Planning Network, NAPFA, Journal of Accountancy, Above the Law. One article = one authoritative backlink + AI citation source.",
+                "action":   "Publish guest content in trade publications and industry media",
+                "detail":   "Target trade publications, podcasts, newsletters, and industry blogs your ICP actually reads. One article = one authoritative backlink + AI citation source.",
                 "impact":   "Third-party mentions are the strongest signal for Perplexity and ChatGPT citations",
             })
 

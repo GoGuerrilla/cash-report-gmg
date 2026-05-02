@@ -1199,7 +1199,7 @@ class PDFReportGenerator:
             _rec_row("HIGH",   "Launch a client referral program",
                      "Offer 1 free month for every referred client who signs.", "1 month"),
             _rec_row("MEDIUM", "Biweekly email newsletter",
-                     "Compliance-safe tips, case studies, industry news.", "2–4 weeks"),
+                     "Mix of value-tips, case studies, and category news your ICP cares about.", "2–4 weeks"),
             _rec_row("MEDIUM", "Collect testimonials from every client",
                      "2–3 sentence quote + permission for website and LinkedIn.", "2 weeks"),
         ])

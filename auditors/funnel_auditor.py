@@ -56,16 +56,16 @@ class FunnelAuditor:
         if len(platforms) >= 5:
             issues.append(
                 f"🟡 Active on {len(platforms)} channels — awareness spread too thin. "
-                f"For B2B financial services, depth on 2-3 channels beats breadth on 8."
+                f"Depth on 2-3 channels typically beats breadth on 8 — focus where your ICP actually spends time."
             )
         if "LinkedIn" in platforms:
-            strengths.append("✅ LinkedIn is the #1 B2B awareness channel for financial services.")
+            strengths.append("✅ LinkedIn presence — strong B2B awareness signal.")
 
         # Follower sizes
         if linkedin_followers and linkedin_followers < 2000:
             issues.append(
                 f"🟡 LinkedIn has {linkedin_followers:,} followers — below the threshold "
-                f"(~5,000+) needed for meaningful organic reach to financial advisors, CPAs, and attorneys."
+                f"(~5,000+) typically needed for meaningful organic reach to a B2B buyer audience."
             )
         elif linkedin_followers >= 5000:
             strengths.append(f"✅ LinkedIn has {linkedin_followers:,} followers — solid B2B reach.")
@@ -73,7 +73,7 @@ class FunnelAuditor:
         if discord_members and discord_members < 500:
             issues.append(
                 f"🔴 Discord has only {discord_members} members — too small to drive "
-                f"meaningful B2B leads, and wrong platform for financial services."
+                f"meaningful leads, and a low-fit channel for most B2B service businesses."
             )
 
         return {"issues": issues, "strengths": strengths}
@@ -92,17 +92,17 @@ class FunnelAuditor:
             strengths.append("✅ Lead magnet present on website.")
         else:
             issues.append(
-                "🔴 No lead magnet found. Financial advisors, CPAs, and attorneys need a low-risk "
-                "first step (free audit, checklist, guide, case study tailored to their profession). "
-                "Without this, cold visitors have no reason to share their contact info."
+                "🔴 No lead magnet found. Cold visitors need a low-risk first step "
+                "(free audit, checklist, guide, or short case study) to justify giving their contact info. "
+                "Without one, top-of-funnel traffic walks away anonymous."
             )
 
         if has_email_optin:
             strengths.append("✅ Email opt-in found — top of funnel capture in place.")
         else:
             issues.append(
-                "🔴 No visible email opt-in/capture form. Email marketing has 42:1 ROI "
-                "and is the primary nurture channel for B2B financial services."
+                "🔴 No visible email opt-in/capture form. Email marketing typically yields ~42:1 ROI "
+                "and is the highest-ownership nurture channel for most service businesses."
             )
 
         if has_contact_form:
@@ -114,7 +114,7 @@ class FunnelAuditor:
             if "calendar.google.com" in booking_url or "calendly" in booking_url.lower():
                 issues.append(
                     "🟡 Booking goes to a raw Google Calendar link. "
-                    "This looks unprofessional for B2B financial services. "
+                    "This reads as unprofessional for most service-business buyers. "
                     "Replace with a dedicated scheduling tool (e.g. [YOUR BOOKING LINK])."
                 )
             else:
@@ -143,7 +143,7 @@ class FunnelAuditor:
         else:
             issues.append(
                 "🔴 No email nurture sequence found. "
-                "B2B financial services sales cycles run 60-180 days — "
+                "B2B service sales cycles often run 60-180 days — "
                 "without nurture, leads go cold before they convert."
             )
 
@@ -152,12 +152,12 @@ class FunnelAuditor:
         elif email_list_size > 0:
             issues.append(
                 f"🟡 Email list is small ({email_list_size} contacts). "
-                "Grow it with a professional services-specific lead magnet (e.g. guide for advisors, CPAs, or attorneys)."
+                "Grow it with a lead magnet tailored to your ICP (e.g. a free guide, audit, checklist, or short report)."
             )
         elif not has_newsletter:
             issues.append(
-                "🔴 No email list reported. Email marketing has 42:1 ROI and is "
-                "the primary nurture channel for B2B financial services."
+                "🔴 No email list reported. Email marketing typically yields ~42:1 ROI and is "
+                "the highest-ownership nurture channel for most service businesses."
             )
 
         if has_blog:
@@ -165,7 +165,7 @@ class FunnelAuditor:
         else:
             issues.append(
                 "🟡 No blog or content hub visible. Long-form content builds trust "
-                "over the extended financial services sales cycle."
+                "over an extended B2B service sales cycle."
             )
 
         if linkedin_freq >= 3:
@@ -176,7 +176,7 @@ class FunnelAuditor:
         if youtube_videos == 0:
             issues.append(
                 "🟡 No YouTube videos confirmed. Video is the highest-trust content format — "
-                "a 'how we help financial advisors, CPAs, and attorneys' series builds authority."
+                "a 'how we help [your ICP]' series builds authority faster than written content."
             )
         elif youtube_videos >= 5:
             strengths.append(f"✅ YouTube library has {youtube_videos} recent videos.")
@@ -196,17 +196,16 @@ class FunnelAuditor:
             strengths.append("✅ Pricing info available — removes friction for serious buyers.")
         else:
             issues.append(
-                "🟡 No pricing visible. B2B buyers in financial services often "
-                "disqualify vendors who hide pricing. Even range pricing builds trust."
+                "🟡 No pricing visible. B2B buyers often "
+                "disqualify vendors who hide pricing. Even 'starting from' or range pricing builds trust."
             )
 
         if has_case_studies:
             strengths.append("✅ Case studies present — critical social proof for B2B conversion.")
         else:
             issues.append(
-                "🔴 No case studies found. Without proof of results for financial "
-                "advisors, CPAs, attorneys, or law firms specifically, the conversion rate will be very low. "
-                "One strong case study beats 100 generic testimonials."
+                "🔴 No case studies found. Without proof of outcomes for clients in your ICP, "
+                "conversion rates stay low. One strong, specific case study typically outperforms 100 generic testimonials."
             )
 
         if has_proposal_cta or has_free_trial:
@@ -243,7 +242,7 @@ class FunnelAuditor:
             strengths.append("✅ Testimonials present on website.")
         else:
             issues.append(
-                "🔴 No testimonials visible. Financial advisors rely heavily on "
+                "🔴 No testimonials visible. B2B and high-consideration buyers rely heavily on "
                 "peer proof before engaging a vendor — this is a critical trust gap."
             )
 
@@ -252,7 +251,7 @@ class FunnelAuditor:
             strengths.append(f"✅ Referral system in place{ref_note}.")
         else:
             issues.append(
-                "🔴 No referral system detected. For financial services B2B, "
+                "🔴 No referral system detected. For most service businesses, "
                 "referrals are the #1 client acquisition channel. "
                 "A structured referral program is high-ROI and low-cost."
             )
@@ -327,9 +326,8 @@ class FunnelAuditor:
             {
                 "priority": "HIGH",
                 "action": "Build a lead magnet specific to each ICP segment",
-                "example": "'Free Marketing Audit for Financial Advisors' or "
-                           "'The 5 Marketing Mistakes Attorneys Make' or "
-                           "'CPA Marketing Playbook: Beyond Tax Season'",
+                "example": "e.g. a free audit, a '[N] common mistakes' guide, "
+                           "a category playbook, or a checklist tied to your ICP's actual pain points",
                 "timeline": "2-3 weeks",
                 "impact": "Creates email list of warm ICP leads"
             },
@@ -342,7 +340,7 @@ class FunnelAuditor:
             },
             {
                 "priority": "HIGH",
-                "action": "Add an email opt-in + 5-email nurture sequence for financial services",
+                "action": "Add an email opt-in + 5-email nurture sequence",
                 "example": "Free guide → Case study → FAQ → Objection handling → Discovery call CTA",
                 "timeline": "2-4 weeks",
                 "impact": "Captures and warms leads over the 60-180 day financial B2B sales cycle"
@@ -350,16 +348,16 @@ class FunnelAuditor:
             {
                 "priority": "MEDIUM",
                 "action": "Publish 1-2 case studies per ICP segment on the website",
-                "example": "How we helped [RIA firm] generate 3 new HNW clients in 90 days; "
-                           "How [law firm] grew inbound leads 40% with content marketing",
+                "example": "Format: How we helped [client / segment] achieve [specific outcome] in [timeframe]. "
+                           "Use real numbers when possible.",
                 "timeline": "1-2 months",
-                "impact": "Single biggest conversion lever for B2B financial services buyers"
+                "impact": "Single biggest conversion lever for B2B and high-consideration buyers"
             },
             {
                 "priority": "MEDIUM",
                 "action": "Add visible pricing or 'starting from' range",
                 "example": "Content marketing packages from $1,500/month",
                 "timeline": "1 week",
-                "impact": "Pre-qualifies leads and builds trust with detail-oriented CPAs and attorneys"
+                "impact": "Pre-qualifies leads and reduces friction with detail-oriented buyers"
             },
         ]
