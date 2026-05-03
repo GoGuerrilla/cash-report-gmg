@@ -961,6 +961,36 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
                         ig.get("data_source"), ig.get("error"), config.instagram_handle)
         audit_data["meta"] = meta_result
 
+    # ── 1e. Apify social fallback ─────────────────────────────────
+    # Meta Graph API requires Page-level access tokens we rarely have for
+    # client pages. When the Meta block above didn't set is_active=True,
+    # Apify's apify/instagram-scraper provides a public-data fallback so
+    # the report stops showing "Pending API" for clients who actually have
+    # active Instagram presences.
+    if config.instagram_handle and channel_data["instagram"].get("is_active") is not True:
+        try:
+            from auditors import apify_social
+            log.info("Apify IG fallback: handle=%r", config.instagram_handle)
+            _t = time.time()
+            ig_data = apify_social.fetch_instagram(config.instagram_handle)
+            log.info("TIMING  apify_instagram         %.2fs", time.time() - _t)
+            for key in ("followers", "post_count", "posts_per_week",
+                        "days_since_last_post", "bio", "recent_posts",
+                        "data_source"):
+                if ig_data.get(key) is not None:
+                    channel_data["instagram"][key] = ig_data[key]
+            channel_data["instagram"]["is_active"] = True
+            log.info("Instagram (Apify): followers=%s ppw=%s "
+                     "days_since=%s recent=%d",
+                     ig_data.get("followers"),
+                     ig_data.get("posts_per_week"),
+                     ig_data.get("days_since_last_post"),
+                     len(ig_data.get("recent_posts", [])))
+        except Exception as exc:
+            log.warning("Apify IG fetch failed for %r: %s",
+                        config.instagram_handle, exc)
+            channel_data["instagram"]["data_source"] = "apify_scrape_failed"
+
     log.info("TIMING  PHASE1_social_collection  %.2fs", time.time() - phase1_start)
 
     # ══ Phase 2: Website + SEO + GBP + Analytics in PARALLEL ══════
