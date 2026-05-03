@@ -540,10 +540,15 @@ class PDFReportGenerator:
     def _overall_banner(self) -> str:
         score = self.cash["overall"]
         g     = self.ai.get("overall_grade", _grade(score))
-        _raw = (self.ai.get("executive_summary", "") or "").strip()
-        if len(_raw) > 220:
-            _raw = _raw[:220].rsplit(" ", 1)[0].rstrip(",;:.- ") + "…"
-        desc = _raw
+        # Prefer cover_topline (purpose-built complete sentence ≤180 chars).
+        # Fall back to executive_summary with word-boundary truncation when an
+        # older synthesis response or a parse-error path didn't produce it.
+        desc = (self.ai.get("cover_topline") or "").strip()
+        if not desc:
+            _raw = (self.ai.get("executive_summary", "") or "").strip()
+            if len(_raw) > 220:
+                _raw = _raw[:220].rsplit(" ", 1)[0].rstrip(",;:.- ") + "…"
+            desc = _raw
         return (f'<div class="overall-score-banner">'
                 f'<div class="osb-grade">'
                 f'<div class="osb-letter">{_h(g)}</div>'
@@ -669,10 +674,13 @@ class PDFReportGenerator:
             f'<tbody>{tbody}</tbody></table>'
         )
 
+        # Page 3 banner removed — the score strip directly above already shows
+        # the overall grade, and the cover_topline appears on page 1. Page 3's
+        # job is the component breakdown; the redundant banner forced the same
+        # short-form copy to repeat and hid the breakdown table below the fold.
         body = (
             f'<div class="page-title">C.A.S.H. <span>Score Overview</span></div>'
             f'{self._score_strip()}'
-            f'{self._overall_banner()}'
             f'{_sub("Component Breakdown")}'
             f'{comp_table}'
         )

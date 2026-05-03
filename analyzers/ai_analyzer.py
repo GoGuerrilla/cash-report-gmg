@@ -529,6 +529,7 @@ TOP STRENGTHS FOUND:
 
 Respond with ONLY this exact JSON (no markdown fences, no extra keys):
 {{
+  "cover_topline": "ONE complete sentence (max 180 chars) that captures the single most important strategic insight for this client. MUST read as a finished, standalone thought — it appears in a fixed-size cover banner and cannot be truncated. Do NOT use 'and' as a fragment ending. Example shape: 'X is spending $Y/month on Z while [problem]; the highest-leverage move is [action].'",
   "executive_summary": "2-3 sentences summarizing the most critical finding and the single highest-leverage action, specific to this client's data",
   "overall_grade": "A/B/C/D/F",
   "overall_score": 0,
