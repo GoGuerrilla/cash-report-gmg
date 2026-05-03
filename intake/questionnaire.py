@@ -90,6 +90,8 @@ _PLATFORM_PATTERNS = [
     ("youtube_channel_url", r"youtube\.com|youtu\.be"),
     ("facebook_page_url",   r"facebook\.com|fb\.com"),
     ("tiktok_handle",       r"tiktok\.com"),
+    # twitter.com URLs still common; x.com is the rebrand domain
+    ("twitter_handle",      r"twitter\.com|^x\.com|/x\.com|//x\.com"),
     ("discord_url",         r"discord\.gg|discord\.com/invite"),
     ("linktree_url",        r"linktr\.ee"),
 ]
@@ -98,6 +100,7 @@ _PLATFORM_PATTERNS = [
 _HANDLE_EXTRACT = {
     "instagram_handle":  r"instagram\.com/([^/?#\s]+)",
     "tiktok_handle":     r"tiktok\.com/@?([^/?#\s]+)",
+    "twitter_handle":    r"(?:twitter\.com|x\.com)/@?([^/?#\s]+)",
 }
 
 
@@ -149,6 +152,7 @@ def _platform_summary(d: Dict[str, Any]) -> str:
         "youtube_channel_url": "YouTube",
         "facebook_page_url":   "Facebook",
         "tiktok_handle":       "TikTok",
+        "twitter_handle":      "X",
         "discord_url":         "Discord",
         "linktree_url":        "Linktree",
     }
@@ -198,6 +202,11 @@ def _classified_to_platforms(classified: Dict[str, Any]) -> Dict[str, Any]:
         m = re.search(r"tiktok\.com/@?([^/?#\s]+)", u, re.I)
         platforms["tiktok_handle"] = m.group(1).strip("/") if m else u
 
+    if classified.get("X"):
+        u = classified["X"][0]
+        m = re.search(r"(?:twitter\.com|x\.com)/@?([^/?#\s]+)", u, re.I)
+        platforms["twitter_handle"] = m.group(1).strip("/") if m else u
+
     if classified.get("YouTube"):
         platforms["youtube_channel_url"] = classified["YouTube"][0]
 
@@ -241,6 +250,7 @@ def _scrape_website_socials(url: str) -> Dict[str, Any]:
             ("YouTube",    r"youtube\.com|youtu\.be"),
             ("Facebook",   r"facebook\.com|fb\.com"),
             ("TikTok",     r"tiktok\.com"),
+            ("X",          r"twitter\.com|^x\.com|/x\.com|//x\.com"),
             ("Discord",    r"discord\.gg|discord\.com/invite"),
         ]
         classified: Dict[str, list] = {}
@@ -553,7 +563,8 @@ def run_intake(skip_if_saved: bool = False) -> ClientConfig:
         lbl for k, lbl in [
             ("linkedin_url","LinkedIn"), ("instagram_handle","Instagram"),
             ("youtube_channel_url","YouTube"), ("facebook_page_url","Facebook"),
-            ("tiktok_handle","TikTok"), ("discord_url","Discord"),
+            ("tiktok_handle","TikTok"), ("twitter_handle","X"),
+            ("discord_url","Discord"),
         ] if platforms.get(k)
     ]
     print(f"  Channels : {', '.join(detected_names) or '—'}")
@@ -590,6 +601,7 @@ def run_intake(skip_if_saved: bool = False) -> ClientConfig:
         "youtube_channel_url":     platforms.get("youtube_channel_url", ""),
         "facebook_page_url":       platforms.get("facebook_page_url", ""),
         "tiktok_handle":           platforms.get("tiktok_handle", ""),
+        "twitter_handle":          platforms.get("twitter_handle", ""),
         "discord_url":             platforms.get("discord_url", ""),
         # Contact & consent
         "contact_email":           contact_email,
@@ -680,6 +692,7 @@ def _dict_to_config(data: dict) -> ClientConfig:
         facebook_page_url=data.get("facebook_page_url", ""),
         discord_url=data.get("discord_url", ""),
         tiktok_handle=data.get("tiktok_handle", ""),
+        twitter_handle=data.get("twitter_handle", ""),
         top_competitors=data.get("top_competitors", []),
         competitor_urls=data.get("competitor_urls", []),
         biggest_marketing_challenge=data.get("biggest_marketing_challenge", ""),

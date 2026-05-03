@@ -31,6 +31,7 @@ class ClientConfig:
     linkedin_url: str = ""
     youtube_channel_url: str = ""
     tiktok_handle: str = ""
+    twitter_handle: str = ""
     discord_url: str = ""
 
     # ── API keys ──────────────────────────────────────────────
@@ -87,6 +88,7 @@ class ClientConfig:
         if self.linkedin_url:        channels.append("LinkedIn")
         if self.youtube_channel_url: channels.append("YouTube")
         if self.tiktok_handle:       channels.append("TikTok")
+        if self.twitter_handle:      channels.append("X")
         if self.discord_url:         channels.append("Discord")
         return channels
 

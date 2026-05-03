@@ -808,6 +808,8 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
                 config.facebook_page_url = plat_data["facebook_page_url"]
             if plat_data.get("tiktok_handle"):
                 config.tiktok_handle = plat_data["tiktok_handle"]
+            if plat_data.get("twitter_handle"):
+                config.twitter_handle = plat_data["twitter_handle"]
             if plat_data.get("discord_url"):
                 config.discord_url = plat_data["discord_url"]
             if not config.website_url:
@@ -832,6 +834,8 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
                 config.facebook_page_url = plat_data["facebook_page_url"]
             if plat_data.get("tiktok_handle"):
                 config.tiktok_handle = plat_data["tiktok_handle"]
+            if plat_data.get("twitter_handle"):
+                config.twitter_handle = plat_data["twitter_handle"]
             if plat_data.get("discord_url"):
                 config.discord_url = plat_data["discord_url"]
             linktree_data = {
