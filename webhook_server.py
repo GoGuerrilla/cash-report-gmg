@@ -971,6 +971,14 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
     # stops showing "Pending API" for clients with active social presences.
     # Per Dave 2026-05-03: run on every audit when a handle is available;
     # skip the actor entirely when no handle (no wasted Apify spend).
+    log.info(
+        "Apify social fallback gate: ig=%r tt=%r tw=%r fb=%r "
+        "(meta_active: ig=%s fb=%s)",
+        config.instagram_handle, config.tiktok_handle,
+        config.twitter_handle, config.facebook_page_url,
+        channel_data["instagram"].get("is_active"),
+        channel_data["facebook"].get("is_active"),
+    )
     from auditors import apify_social
 
     def _merge_social(slot: str, label: str, data: dict, copy_keys: tuple):

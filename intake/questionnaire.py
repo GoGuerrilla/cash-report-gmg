@@ -202,8 +202,11 @@ def _classified_to_platforms(classified: Dict[str, Any]) -> Dict[str, Any]:
         m = re.search(r"tiktok\.com/@?([^/?#\s]+)", u, re.I)
         platforms["tiktok_handle"] = m.group(1).strip("/") if m else u
 
-    if classified.get("X"):
-        u = classified["X"][0]
+    # Linktree scraper uses canonical key "Twitter" (legacy + x.com URLs both
+    # classify here); _scrape_website_socials uses "X". Accept either.
+    _x_links = classified.get("X") or classified.get("Twitter")
+    if _x_links:
+        u = _x_links[0]
         m = re.search(r"(?:twitter\.com|x\.com)/@?([^/?#\s]+)", u, re.I)
         platforms["twitter_handle"] = m.group(1).strip("/") if m else u
 
