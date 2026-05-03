@@ -119,6 +119,29 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _log_schema_sample(label: str, items: List[Dict], missing_fields: List[str]) -> None:
+    """
+    When a normalizer can't extract expected fields, log a one-line schema
+    sample so the next iteration knows which actor field names to use.
+    Truncates the dump to keep log lines readable.
+    """
+    if not items or not missing_fields:
+        return
+    first = items[0] if isinstance(items[0], dict) else {}
+    top_keys = sorted(first.keys()) if isinstance(first, dict) else []
+    nested = {}
+    # If actor stores author/profile data nested, surface those keys too
+    for k in ("author", "user", "userInfo", "pageInfo", "ownerProfilePicUrl",
+              "authorMeta", "metadata"):
+        v = first.get(k) if isinstance(first, dict) else None
+        if isinstance(v, dict):
+            nested[k] = sorted(v.keys())[:15]
+    log.info(
+        "apify_social schema-sample [%s] missing=%s top_keys=%s nested=%s",
+        label, missing_fields, top_keys[:25], nested,
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Cadence helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -424,6 +447,17 @@ def _normalize_twitter(
         })
 
     cadence = _cadence_from_dates(pub_dates)
+
+    # Diagnostic: surface actor's actual schema when expected fields came back None
+    _missing = [name for name, val in (
+        ("followers", followers),
+        ("post_count", post_count),
+        ("posts_per_week", cadence["posts_per_week"]),
+        ("days_since_last_post", cadence["days_since_last_post"]),
+    ) if val is None]
+    if _missing:
+        _log_schema_sample(f"twitter:{handle}", items, _missing)
+
     return {
         "platform":             "X",
         "handle":               f"@{handle}",
@@ -475,6 +509,15 @@ def _normalize_facebook(
         })
 
     cadence = _cadence_from_dates(pub_dates)
+
+    # Diagnostic: surface actor's actual schema when expected fields came back None
+    _missing = [name for name, val in (
+        ("followers", followers),
+        ("post_count", post_count),
+    ) if val is None]
+    if _missing:
+        _log_schema_sample(f"facebook:{page_slug}", items, _missing)
+
     return {
         "platform":             "Facebook",
         "handle":               page_slug,
