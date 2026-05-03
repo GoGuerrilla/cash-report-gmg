@@ -803,8 +803,8 @@ class DocxReportGenerator:
             ))
 
         if self.config.facebook_page_url:
-            if meta_token:
-                fb = ch_data.get("facebook", {})
+            fb = ch_data.get("facebook", {})
+            if fb.get("is_active"):
                 snap_rows.append((
                     "Facebook",
                     _fmt_c(fb.get("followers")),
@@ -817,8 +817,8 @@ class DocxReportGenerator:
                 snap_rows.append(("Facebook", "—", "—", "—", "Pending API"))
 
         if self.config.instagram_handle:
-            if meta_token:
-                ig = ch_data.get("instagram", {})
+            ig = ch_data.get("instagram", {})
+            if ig.get("is_active"):
                 snap_rows.append((
                     "Instagram",
                     _fmt_c(ig.get("followers")),
@@ -829,6 +829,34 @@ class DocxReportGenerator:
                 ))
             else:
                 snap_rows.append(("Instagram", "—", "—", "—", "Pending API"))
+
+        if self.config.tiktok_handle:
+            tt = ch_data.get("tiktok", {})
+            if tt.get("is_active"):
+                snap_rows.append((
+                    "TikTok",
+                    _fmt_c(tt.get("followers")),
+                    _fmt_p(tt.get("posts_per_week")),
+                    _fmt_d(tt.get("days_since_last_post")
+                           or fresh_ch.get("TikTok", {}).get("days_since_last_post")),
+                    _active(tt.get("posts_per_week")),
+                ))
+            else:
+                snap_rows.append(("TikTok", "—", "—", "—", "Pending API"))
+
+        if self.config.twitter_handle:
+            tw = ch_data.get("twitter", {})
+            if tw.get("is_active"):
+                snap_rows.append((
+                    "X",
+                    _fmt_c(tw.get("followers")),
+                    _fmt_p(tw.get("posts_per_week")),
+                    _fmt_d(tw.get("days_since_last_post")
+                           or fresh_ch.get("X", {}).get("days_since_last_post")),
+                    _active(tw.get("posts_per_week")),
+                ))
+            else:
+                snap_rows.append(("X", "—", "—", "—", "Pending API"))
 
         if snap_rows:
             self._subsection(doc, "Social Media Snapshot")

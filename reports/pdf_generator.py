@@ -971,10 +971,10 @@ class PDFReportGenerator:
                               v30=yt_metrics.get("videos_last_30_days")),
             ))
 
-        # Facebook
+        # Facebook — Apify (or Meta API) data when present, else Pending
         if self.config.facebook_page_url:
-            if meta_token:
-                fb = ch_data.get("facebook", {})
+            fb = ch_data.get("facebook", {})
+            if fb.get("is_active"):
                 snap_rows.append((
                     "Facebook",
                     _fmt_count(fb.get("followers")),
@@ -988,10 +988,10 @@ class PDFReportGenerator:
                 snap_rows.append(("Facebook", "—", "—", "—",
                                   _sbadge("gray", "Pending API")))
 
-        # Instagram
+        # Instagram — Apify (or Meta API) data when present, else Pending
         if self.config.instagram_handle:
-            if meta_token:
-                ig = ch_data.get("instagram", {})
+            ig = ch_data.get("instagram", {})
+            if ig.get("is_active"):
                 snap_rows.append((
                     "Instagram",
                     _fmt_count(ig.get("followers")),
@@ -1003,6 +1003,40 @@ class PDFReportGenerator:
                 ))
             else:
                 snap_rows.append(("Instagram", "—", "—", "—",
+                                  _sbadge("gray", "Pending API")))
+
+        # TikTok — Apify-only path
+        if self.config.tiktok_handle:
+            tt = ch_data.get("tiktok", {})
+            if tt.get("is_active"):
+                snap_rows.append((
+                    "TikTok",
+                    _fmt_count(tt.get("followers")),
+                    _fmt_ppw(tt.get("posts_per_week")),
+                    _fmt_days(tt.get("days_since_last_post")
+                              or fresh_ch.get("TikTok", {}).get("days_since_last_post")),
+                    _active_badge(tt.get("posts_per_week"),
+                                  tt.get("days_since_last_post")),
+                ))
+            else:
+                snap_rows.append(("TikTok", "—", "—", "—",
+                                  _sbadge("gray", "Pending API")))
+
+        # X (Twitter) — Apify-only path
+        if self.config.twitter_handle:
+            tw = ch_data.get("twitter", {})
+            if tw.get("is_active"):
+                snap_rows.append((
+                    "X",
+                    _fmt_count(tw.get("followers")),
+                    _fmt_ppw(tw.get("posts_per_week")),
+                    _fmt_days(tw.get("days_since_last_post")
+                              or fresh_ch.get("X", {}).get("days_since_last_post")),
+                    _active_badge(tw.get("posts_per_week"),
+                                  tw.get("days_since_last_post")),
+                ))
+            else:
+                snap_rows.append(("X", "—", "—", "—",
                                   _sbadge("gray", "Pending API")))
 
         if snap_rows:
