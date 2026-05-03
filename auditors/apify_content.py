@@ -80,6 +80,12 @@ _PRIORITY_GROUPS = [
     ["/about", "/about-us", "/team"],
     ["/faq", "/faqs", "/help"],
     ["/contact", "/contact-us", "/book", "/schedule"],
+    # Blog landing — so depth-2 crawl reaches individual posts. Without this,
+    # Wix sites whose sitemap doesn't surface /blog never have their posts
+    # discovered (observed on goguerrilla.xyz: pages=16 blog_posts=0 despite
+    # an active blog section).
+    ["/blog", "/articles", "/insights", "/news", "/resources",
+     "/marketing-insights", "/posts", "/journal", "/learn"],
 ]
 
 # ── Blog URL patterns and JSON-LD types ──────────────────────────────────────
