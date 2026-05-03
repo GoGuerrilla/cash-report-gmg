@@ -967,33 +967,81 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
 
     # ── 1e. Apify social fallback ─────────────────────────────────
     # Meta Graph API requires Page-level access tokens we rarely have for
-    # client pages. When the Meta block above didn't set is_active=True,
-    # Apify's apify/instagram-scraper provides a public-data fallback so
-    # the report stops showing "Pending API" for clients who actually have
-    # active Instagram presences.
+    # client pages. Apify scrapers provide a public-data path so the report
+    # stops showing "Pending API" for clients with active social presences.
+    # Per Dave 2026-05-03: run on every audit when a handle is available;
+    # skip the actor entirely when no handle (no wasted Apify spend).
+    from auditors import apify_social
+
+    def _merge_social(slot: str, label: str, data: dict, copy_keys: tuple):
+        for key in copy_keys:
+            if data.get(key) is not None:
+                channel_data[slot][key] = data[key]
+        channel_data[slot]["is_active"] = True
+        log.info(
+            "%s (Apify): followers=%s ppw=%s days_since=%s recent=%d",
+            label,
+            data.get("followers"),
+            data.get("posts_per_week"),
+            data.get("days_since_last_post"),
+            len(data.get("recent_posts", [])),
+        )
+
+    _SOCIAL_KEYS = ("followers", "post_count", "posts_per_week",
+                    "days_since_last_post", "bio", "recent_posts",
+                    "data_source")
+
+    # Instagram — fallback when Meta API didn't populate
     if config.instagram_handle and channel_data["instagram"].get("is_active") is not True:
         try:
-            from auditors import apify_social
             log.info("Apify IG fallback: handle=%r", config.instagram_handle)
             _t = time.time()
             ig_data = apify_social.fetch_instagram(config.instagram_handle)
             log.info("TIMING  apify_instagram         %.2fs", time.time() - _t)
-            for key in ("followers", "post_count", "posts_per_week",
-                        "days_since_last_post", "bio", "recent_posts",
-                        "data_source"):
-                if ig_data.get(key) is not None:
-                    channel_data["instagram"][key] = ig_data[key]
-            channel_data["instagram"]["is_active"] = True
-            log.info("Instagram (Apify): followers=%s ppw=%s "
-                     "days_since=%s recent=%d",
-                     ig_data.get("followers"),
-                     ig_data.get("posts_per_week"),
-                     ig_data.get("days_since_last_post"),
-                     len(ig_data.get("recent_posts", [])))
+            _merge_social("instagram", "Instagram", ig_data, _SOCIAL_KEYS)
         except Exception as exc:
             log.warning("Apify IG fetch failed for %r: %s",
                         config.instagram_handle, exc)
             channel_data["instagram"]["data_source"] = "apify_scrape_failed"
+
+    # TikTok — Apify is the only path (no Meta-equivalent for TikTok)
+    if config.tiktok_handle:
+        try:
+            log.info("Apify TikTok fetch: handle=%r", config.tiktok_handle)
+            _t = time.time()
+            tt_data = apify_social.fetch_tiktok(config.tiktok_handle)
+            log.info("TIMING  apify_tiktok            %.2fs", time.time() - _t)
+            _merge_social("tiktok", "TikTok", tt_data, _SOCIAL_KEYS)
+        except Exception as exc:
+            log.warning("Apify TikTok fetch failed for %r: %s",
+                        config.tiktok_handle, exc)
+            channel_data["tiktok"]["data_source"] = "apify_scrape_failed"
+
+    # X (Twitter) — Apify is the only path
+    if config.twitter_handle:
+        try:
+            log.info("Apify X fetch: handle=%r", config.twitter_handle)
+            _t = time.time()
+            tw_data = apify_social.fetch_twitter(config.twitter_handle)
+            log.info("TIMING  apify_twitter           %.2fs", time.time() - _t)
+            _merge_social("twitter", "X", tw_data, _SOCIAL_KEYS)
+        except Exception as exc:
+            log.warning("Apify X fetch failed for %r: %s",
+                        config.twitter_handle, exc)
+            channel_data["twitter"]["data_source"] = "apify_scrape_failed"
+
+    # Facebook — fallback when Meta Graph API didn't populate
+    if config.facebook_page_url and channel_data["facebook"].get("is_active") is not True:
+        try:
+            log.info("Apify FB fallback: page=%r", config.facebook_page_url)
+            _t = time.time()
+            fb_data = apify_social.fetch_facebook_posts(config.facebook_page_url)
+            log.info("TIMING  apify_facebook          %.2fs", time.time() - _t)
+            _merge_social("facebook", "Facebook", fb_data, _SOCIAL_KEYS)
+        except Exception as exc:
+            log.warning("Apify FB fetch failed for %r: %s",
+                        config.facebook_page_url, exc)
+            channel_data["facebook"]["data_source"] = "apify_scrape_failed"
 
     log.info("TIMING  PHASE1_social_collection  %.2fs", time.time() - phase1_start)
 
