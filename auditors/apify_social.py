@@ -38,6 +38,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -285,38 +286,57 @@ def fetch_facebook_posts(page_url: str) -> Dict[str, Any]:
 def fetch_twitter_followers(handle_or_url: str) -> Dict[str, Any]:
     """
     Premium X follower-count fetcher via kaitoeasyapi/premium-x-follower-scraper-following-data.
-    Use as a complement to fetch_twitter() — that actor returns tweets, this one
-    returns the page-level follower / following counts that the tweet-scraper
-    sometimes drops. Higher per-call cost but reliable for the count.
 
-    Returns: {handle, followers, following, raw_count, data_source, scraped_at}
+    Verified input schema 2026-05-03 (per Dave's successful test):
+        {
+          "user_names": ["handle"],
+          "getFollowers":   true,
+          "getFollowing":   true,
+          "maxFollowers":   200,
+          "maxFollowings":  200,
+        }
+
+    Actor returns a list of follower / following user records. For audit
+    purposes we just need the count, so we cap at 200 follower records (the
+    actor's default sample size) and use len(items) as the floor count. If
+    the actor exposes total_count / totalFollowers metadata on any record we
+    prefer that over the sample size.
     """
     if not (handle_or_url or "").strip():
         raise RuntimeError("apify_social_failed — twitter_followers: empty input")
 
     raw = handle_or_url.strip().lstrip("@").rstrip("/")
     handle = raw.split("/")[-1] if "/" in raw else raw
+    # Actor uses lowercase usernames per spec
+    user_name = handle.lower()
 
-    # Schema unverified — accept multiple common input shapes; the actor will
-    # tolerate the right one and ignore the others.
     payload = {
-        "handles":        [handle],
-        "twitterHandles": [handle],
-        "usernames":      [handle],
-        "maxItems":       1,
+        "user_names":     [user_name],
+        "getFollowers":   True,
+        "getFollowing":   False,   # save cost — we only need the follower count
+        "maxFollowers":   200,
+        "maxFollowings":  0,
     }
     items = _retry_call(_ACTOR_TWITTER_FOLLOWERS, payload, f"twitter_followers:{handle}")
 
-    first = items[0] if items else {}
-    # Defensive: try multiple common field names. Diagnostic logger will surface
-    # the actual schema on first run if these all miss.
-    followers  = (first.get("followers")
-                  or first.get("followersCount")
-                  or first.get("follower_count")
-                  or first.get("followers_count") or None)
-    following  = (first.get("following")
-                  or first.get("followingCount")
-                  or first.get("following_count") or None)
+    # Try to find an explicit count field on any returned record; otherwise
+    # fall back to len(items) as the lower-bound follower count.
+    followers = None
+    for it in items[:5]:
+        if not isinstance(it, dict):
+            continue
+        for key in ("followers_count", "followersCount", "totalFollowers",
+                    "total_followers", "followerCount"):
+            v = it.get(key)
+            if isinstance(v, int) and v > 0:
+                followers = v
+                break
+        if followers:
+            break
+
+    if followers is None and items:
+        # Each item is a follower record — count them as a floor estimate
+        followers = len(items)
 
     if followers is None:
         _log_schema_sample(f"twitter_followers:{handle}", items, ["followers"])
@@ -324,7 +344,7 @@ def fetch_twitter_followers(handle_or_url: str) -> Dict[str, Any]:
     return {
         "handle":      f"@{handle}",
         "followers":   followers,
-        "following":   following,
+        "following":   None,   # not requested
         "data_source": "apify_kaitoeasyapi_premium_x_follower_scraper",
         "scraped_at":  _now_iso(),
         "raw_count":   len(items),
@@ -334,10 +354,14 @@ def fetch_twitter_followers(handle_or_url: str) -> Dict[str, Any]:
 def fetch_facebook_followers(page_url: str) -> Dict[str, Any]:
     """
     Page-level follower-count fetcher via apify/facebook-followers-following-scraper.
-    Use as a complement to fetch_facebook_posts() — that actor is post-only and
-    drops follower count entirely.
 
-    Returns: {page_url, followers, following, raw_count, data_source, scraped_at}
+    Verified actor output 2026-05-03: returns a LIST of follower-person records,
+    each with keys like __typename, facebookId, facebookUrl, followType,
+    followersId, image, subtitle_text, title, url. Per-record subtitle_text
+    sometimes contains 'X followers' on the subject page; fallback is len(items)
+    as a floor count when the response only includes the sample list.
+
+    Returns: {page_url, followers, raw_count, data_source, scraped_at}
     """
     if not (page_url or "").strip():
         raise RuntimeError("apify_social_failed — facebook_followers: empty input")
@@ -351,14 +375,43 @@ def fetch_facebook_followers(page_url: str) -> Dict[str, Any]:
     }
     items = _retry_call(_ACTOR_FB_FOLLOWERS, payload, f"facebook_followers:{page_slug}")
 
-    first = items[0] if items else {}
-    followers  = (first.get("followers")
-                  or first.get("followersCount")
-                  or first.get("followerCount")
-                  or first.get("pageFollowers") or None)
-    following  = (first.get("following")
-                  or first.get("followingCount")
-                  or first.get("likes") or None)   # FB pages: likes is a near-equivalent
+    followers = None
+
+    # Try direct count fields first (in case the actor surfaces totals)
+    for it in items[:5]:
+        if not isinstance(it, dict):
+            continue
+        for key in ("followers", "followersCount", "followerCount",
+                    "pageFollowers", "totalFollowers"):
+            v = it.get(key)
+            if isinstance(v, int) and v > 0:
+                followers = v
+                break
+        if followers:
+            break
+
+    # Parse follower count from subtitle_text on any record (e.g. "12K followers")
+    if followers is None:
+        for it in items[:5]:
+            sub = (it.get("subtitle_text") or "") if isinstance(it, dict) else ""
+            m = re.search(r"([\d.,]+)\s*([KkMm]?)\s*followers?", sub, re.I)
+            if m:
+                num_str = m.group(1).replace(",", "")
+                try:
+                    n = float(num_str)
+                    suffix = m.group(2).upper()
+                    if suffix == "K":
+                        n *= 1_000
+                    elif suffix == "M":
+                        n *= 1_000_000
+                    followers = int(n)
+                    break
+                except ValueError:
+                    continue
+
+    # Last resort: use the count of returned follower records as a lower bound
+    if followers is None and items:
+        followers = len(items)
 
     if followers is None:
         _log_schema_sample(f"facebook_followers:{page_slug}", items, ["followers"])
@@ -366,7 +419,6 @@ def fetch_facebook_followers(page_url: str) -> Dict[str, Any]:
     return {
         "page_url":    page_url,
         "followers":   followers,
-        "following":   following,
         "data_source": "apify_facebook_followers_following_scraper",
         "scraped_at":  _now_iso(),
         "raw_count":   len(items),
