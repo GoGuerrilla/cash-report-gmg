@@ -891,6 +891,23 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
         else:
             log.info("LinkedIn scrape returned source=%s", src)
 
+        # LinkedIn followers enricher — runs as backup when the existing
+        # scraper didn't return a follower count (fallback paths often miss it).
+        if channel_data["linkedin"].get("followers") is None:
+            try:
+                from auditors import apify_social as _apify_social_li
+                log.info("Apify LinkedIn followers fetch: url=%r", config.linkedin_url)
+                _t = time.time()
+                li_followers = _apify_social_li.fetch_linkedin_followers(config.linkedin_url)
+                log.info("TIMING  apify_linkedin_followers %.2fs", time.time() - _t)
+                if li_followers.get("followers") is not None:
+                    channel_data["linkedin"]["followers"] = li_followers["followers"]
+                    log.info("LinkedIn followers (Apify): %s",
+                             li_followers["followers"])
+            except Exception as exc:
+                log.warning("Apify LinkedIn followers fetch failed for %r: %s",
+                            config.linkedin_url, exc)
+
     # ── 1c. YouTube ───────────────────────────────────────────────
     if config.youtube_channel_url:
         yt_key = os.environ.get("YOUTUBE_API_KEY", "")
@@ -917,6 +934,33 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
                             config.youtube_channel_url, yt.get("error"), yt.get("data_source"))
         else:
             log.warning("YouTube: YOUTUBE_API_KEY not set — channel scored at 50 neutral")
+
+        # YouTube Apify fallback — runs if YouTube Data API path didn't populate
+        # subscriber count (no key set, API failed, or quota exceeded).
+        if channel_data["youtube"].get("subscriber_count") is None:
+            try:
+                from auditors import apify_social as _apify_social_yt
+                log.info("Apify YouTube fallback fetch: url=%r", config.youtube_channel_url)
+                _t = time.time()
+                yt_apify = _apify_social_yt.fetch_youtube(config.youtube_channel_url)
+                log.info("TIMING  apify_youtube           %.2fs", time.time() - _t)
+                if yt_apify.get("followers") is not None:
+                    channel_data["youtube"]["subscriber_count"] = yt_apify["followers"]
+                if yt_apify.get("post_count") is not None:
+                    channel_data["youtube"]["total_video_count"] = yt_apify["post_count"]
+                if yt_apify.get("posts_per_week") is not None:
+                    channel_data["youtube"]["posts_per_week"] = yt_apify["posts_per_week"]
+                if yt_apify.get("days_since_last_post") is not None:
+                    channel_data["youtube"]["days_since_last_post"] = yt_apify["days_since_last_post"]
+                channel_data["youtube"]["data_source"] = yt_apify.get("data_source")
+                channel_data["youtube"]["is_active"] = True
+                log.info("YouTube (Apify): subs=%s ppw=%s days_since=%s",
+                         yt_apify.get("followers"),
+                         yt_apify.get("posts_per_week"),
+                         yt_apify.get("days_since_last_post"))
+            except Exception as exc:
+                log.warning("Apify YouTube fetch failed for %r: %s",
+                            config.youtube_channel_url, exc)
 
     # ── 1d. Meta Graph API ────────────────────────────────────────
     meta_app_id = os.environ.get("META_APP_ID", "")

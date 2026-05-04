@@ -50,16 +50,18 @@ log = logging.getLogger(__name__)
 # Actor slugs — Apify URL form uses ~ instead of /
 # ─────────────────────────────────────────────────────────────────────────────
 
-_ACTOR_INSTAGRAM         = "apify~instagram-scraper"
-_ACTOR_TIKTOK            = "clockworks~tiktok-scraper"
+_ACTOR_INSTAGRAM           = "apify~instagram-scraper"
+_ACTOR_TIKTOK              = "clockworks~tiktok-scraper"
 # Replaced apidojo/twitter-scraper-lite (returned only {'demo': ...} placeholder
 # data) with apidojo/twitter-user-scraper — the full user-scraper variant returns
 # real profile + recent tweets per handle. Approved by Dave 2026-05-03.
-_ACTOR_TWITTER           = "apidojo~twitter-user-scraper"
-_ACTOR_TWITTER_FOLLOWERS = "kaitoeasyapi~premium-x-follower-scraper-following-data"
-_ACTOR_FB_POSTS          = "apify~facebook-posts-scraper"
-_ACTOR_FB_FOLLOWERS      = "apify~facebook-followers-following-scraper"
-_ACTOR_FB_COMMENTS       = "apify~facebook-comments-scraper"  # Phase 2
+_ACTOR_TWITTER             = "apidojo~twitter-user-scraper"
+_ACTOR_TWITTER_FOLLOWERS   = "kaitoeasyapi~premium-x-follower-scraper-following-data"
+_ACTOR_FB_POSTS            = "apify~facebook-posts-scraper"
+_ACTOR_FB_FOLLOWERS        = "apify~facebook-followers-following-scraper"
+_ACTOR_FB_COMMENTS         = "apify~facebook-comments-scraper"  # Phase 2
+_ACTOR_LINKEDIN_FOLLOWERS  = "data_link_miner~linkedin-company-followers-scraper"
+_ACTOR_YOUTUBE             = "streamers~youtube-scraper"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Call parameters
@@ -368,6 +370,131 @@ def fetch_facebook_followers(page_url: str) -> Dict[str, Any]:
         "data_source": "apify_facebook_followers_following_scraper",
         "scraped_at":  _now_iso(),
         "raw_count":   len(items),
+    }
+
+
+def fetch_linkedin_followers(company_url: str) -> Dict[str, Any]:
+    """
+    LinkedIn company-page follower-count fetcher via
+    data_link_miner/linkedin-company-followers-scraper.
+
+    Use as a backup/enrichment when the existing linkedin_scraper returns no
+    follower count or fails. Returns the same shape as the other follower
+    fetchers: {url, followers, raw_count, data_source, scraped_at}.
+    """
+    if not (company_url or "").strip():
+        raise RuntimeError("apify_social_failed — linkedin_followers: empty input")
+
+    company_url = company_url.strip().rstrip("/")
+    slug = company_url.rsplit("/", 1)[-1] or company_url
+
+    payload = {
+        "startUrls":     [{"url": company_url}],
+        "companyUrls":   [company_url],
+        "maxItems":      1,
+    }
+    items = _retry_call(_ACTOR_LINKEDIN_FOLLOWERS, payload, f"linkedin_followers:{slug}")
+
+    first = items[0] if items else {}
+    followers = (first.get("followers")
+                 or first.get("followersCount")
+                 or first.get("followerCount")
+                 or first.get("companyFollowers") or None)
+
+    if followers is None:
+        _log_schema_sample(f"linkedin_followers:{slug}", items, ["followers"])
+
+    return {
+        "url":         company_url,
+        "followers":   followers,
+        "data_source": "apify_data_link_miner_linkedin_followers",
+        "scraped_at":  _now_iso(),
+        "raw_count":   len(items),
+    }
+
+
+def fetch_youtube(channel_url: str) -> Dict[str, Any]:
+    """
+    YouTube channel + recent videos via streamers/youtube-scraper.
+
+    Backup/alternative to the existing YouTube Data API v3 path — useful when
+    YOUTUBE_API_KEY is not set or the API returns no usable data.
+
+    Returns the standard social-fetcher shape (followers = subscriber count).
+    """
+    if not (channel_url or "").strip():
+        raise RuntimeError("apify_social_failed — youtube: empty input")
+
+    channel_url = channel_url.strip().rstrip("/")
+    handle = channel_url.rsplit("/", 1)[-1].lstrip("@") or channel_url
+
+    payload = {
+        "startUrls":      [{"url": channel_url}],
+        "channelUrls":    [channel_url],
+        "maxResults":     _RESULTS_LIMIT,
+        "maxVideos":      _RESULTS_LIMIT,
+    }
+    items = _retry_call(_ACTOR_YOUTUBE, payload, f"youtube:{handle}")
+
+    first = items[0] if items else {}
+    # Try multiple common YouTube actor field names
+    followers   = (first.get("subscriberCount")
+                   or first.get("subscribers")
+                   or first.get("channelSubscriberCount")
+                   or (first.get("channel") or {}).get("subscriberCount")
+                   or None)
+    post_count  = (first.get("videoCount")
+                   or first.get("totalVideos")
+                   or (first.get("channel") or {}).get("videoCount")
+                   or None)
+    bio         = (first.get("description")
+                   or (first.get("channel") or {}).get("description")
+                   or "").strip()
+
+    recent_posts: List[Dict] = []
+    pub_dates: List[datetime] = []
+    # Videos may be on first item directly or in a nested .videos array
+    videos = first.get("videos") or items
+    for v in videos[:_RESULTS_LIMIT]:
+        if not isinstance(v, dict):
+            continue
+        published = (v.get("uploadDate") or v.get("publishedAt")
+                     or v.get("publishDate") or v.get("date"))
+        d = _parse_iso(published)
+        if d:
+            pub_dates.append(d)
+        recent_posts.append({
+            "url":        v.get("url") or v.get("videoUrl") or v.get("watchUrl"),
+            "text":       v.get("title") or "",
+            "published":  published,
+            "views":      v.get("viewCount") or v.get("views"),
+            "likes":      v.get("likeCount") or v.get("likes"),
+            "comments":   v.get("commentCount"),
+        })
+
+    cadence = _cadence_from_dates(pub_dates)
+
+    _missing = [name for name, val in (
+        ("followers", followers),
+        ("post_count", post_count),
+        ("posts_per_week", cadence["posts_per_week"]),
+    ) if val is None]
+    if _missing:
+        _log_schema_sample(f"youtube:{handle}", items, _missing)
+
+    return {
+        "platform":             "YouTube",
+        "handle":               handle,
+        "url":                  channel_url,
+        "followers":            followers,
+        "post_count":           post_count,
+        "recent_posts":         recent_posts,
+        "posts_per_week":       cadence["posts_per_week"],
+        "days_since_last_post": cadence["days_since_last_post"],
+        "bio":                  bio,
+        "data_source":          "apify_streamers_youtube_scraper",
+        "scraped_at":           _now_iso(),
+        "raw_count":            len(items),
     }
 
 
