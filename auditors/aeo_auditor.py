@@ -26,12 +26,21 @@ rendering can be developed against the full shape from day one.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+import os
+import re
+from typing import Any, Dict, List, Optional
 
 from config import ClientConfig
 from auditors.industry_benchmarks import industry_label, is_local_business
 
 log = logging.getLogger(__name__)
+
+# Phase B — LLM-eval model. Haiku is sufficient for short numeric grading
+# tasks and keeps per-audit cost in the $0.01-0.02 range. Configurable via
+# AEO_EVAL_MODEL env var if a future tier needs a stronger model.
+_EVAL_MODEL = os.environ.get("AEO_EVAL_MODEL", "claude-haiku-4-5-20251001")
+_EVAL_MAX_TOKENS = 200
+_EVAL_TIMEOUT   = 30  # seconds — each call should complete in 2-5s
 
 # ── Scoring weights per the pillar spec ──────────────────────────────────────
 
@@ -77,6 +86,75 @@ class AEOAuditor:
             getattr(config, "industry_category", None)
             or getattr(config, "client_industry", None)
         )
+        # Cached page text — collected once, fed to LLM-eval scorers
+        self._page_text = self._extract_page_text()
+        self._anthropic_key = (
+            getattr(config, "anthropic_api_key", "")
+            or os.environ.get("ANTHROPIC_API_KEY", "")
+        ).strip()
+
+    def _extract_page_text(self) -> str:
+        """Concatenate homepage + first inner page text for LLM-eval input."""
+        pages = self.site.get("pages", []) or []
+        chunks: List[str] = []
+        for p in pages[:3]:
+            if not isinstance(p, dict):
+                continue
+            for key in ("text", "content"):
+                t = p.get(key)
+                if t and isinstance(t, str):
+                    chunks.append(t)
+                    break
+            # Also pull headings — useful signal for question-format detection
+            for h in p.get("headings", []) or []:
+                if isinstance(h, dict):
+                    txt = h.get("text") or ""
+                    if txt:
+                        chunks.append(txt)
+        text = " ".join(chunks).strip()
+        # Cap at 8000 chars — Haiku handles much more but we want fast/cheap
+        return text[:8000]
+
+    def _llm_score(self, label: str, instruction: str) -> Optional[Dict[str, Any]]:
+        """
+        Run a single Haiku call to score one AEO category.
+        Returns {"score": int, "explain": str} or None on any failure
+        (caller falls back to 50 stub).
+        """
+        if not self._anthropic_key:
+            return None
+        if not self._page_text:
+            return None
+        try:
+            import anthropic
+            client = anthropic.Anthropic(
+                api_key=self._anthropic_key, timeout=_EVAL_TIMEOUT,
+            )
+            prompt = (
+                f"{instruction}\n\n"
+                f"WEBSITE CONTENT:\n{self._page_text}\n\n"
+                f"Respond ONLY with valid JSON of the shape: "
+                f'{{"score": <integer 0-100>, "explain": "<one-sentence justification>"}}'
+            )
+            message = client.messages.create(
+                model=_EVAL_MODEL,
+                max_tokens=_EVAL_MAX_TOKENS,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = (message.content[0].text or "").strip()
+            # Strip markdown fences if present
+            if raw.startswith("```"):
+                raw = "\n".join(raw.split("\n")[1:-1]).strip()
+            import json
+            data = json.loads(raw)
+            score = int(data.get("score", 50))
+            score = max(0, min(100, score))
+            explain = (data.get("explain") or "").strip()[:200]
+            log.info("aeo llm-eval [%s] score=%d explain=%r", label, score, explain[:80])
+            return {"score": score, "explain": explain}
+        except Exception as exc:
+            log.warning("aeo llm-eval [%s] failed: %s — falling back to stub", label, exc)
+            return None
 
     def run(self) -> Dict[str, Any]:
         components: Dict[str, Dict[str, Any]] = {
@@ -173,15 +251,41 @@ class AEOAuditor:
 
     def _score_direct_answer_quality(self) -> Dict[str, Any]:
         """
-        LLM-evaluated: 1-3 sentence clear answers immediately following each
-        question. Defers to Phase B (AEO LLM-eval categories).
+        LLM-eval: scan the website content and grade how often question-format
+        headings or queries are followed by a clear, short (1-3 sentence) answer
+        in plain language. Higher score = AI systems can extract a snippet directly.
+        Falls back to 50 stub when no Anthropic key or no page text.
         """
-        return {
-            "score":     50,
-            "issues":    [],
-            "strengths": [],
-            "detail":    "LLM-eval category — deferred to Phase B.",
-        }
+        result = self._llm_score(
+            "Direct Answer Quality",
+            "You are evaluating Direct Answer Quality for AEO scoring. Look at "
+            "the website content below. On a 0-100 scale, grade how well the "
+            "content provides DIRECT, CLEAR answers to common customer "
+            "questions in 1-3 sentences. Reward content that pairs a question "
+            "(or implicit question topic) with a short, plain-language answer "
+            "an AI system could lift verbatim as a snippet. Penalize long, "
+            "marketing-speak paragraphs that bury the answer or never give one. "
+            "0 = no answers extractable, 50 = some content but answers are "
+            "long/buried, 80+ = several clear question→answer pairs.",
+        )
+        if result is None:
+            return {"score": 50, "issues": [], "strengths": [],
+                    "detail": "LLM-eval skipped (no key or no page text)."}
+        score = result["score"]
+        issues, strengths = [], []
+        if score < 50:
+            issues.append("🔴 Few or no direct, snippet-extractable answers detected — "
+                          "AI systems are unlikely to cite this content as the answer")
+        elif score < 70:
+            issues.append("🟡 Some answers exist but are buried in marketing prose — "
+                          "tighten to 1-3 sentence direct responses for AEO citation")
+        else:
+            strengths.append(f"✅ Direct answer quality strong ({score}/100) — "
+                             f"AI systems can extract clear snippets")
+        return {"score": score, "issues": issues, "strengths": strengths,
+                "detail": result["explain"]}
+
+    # (Conversational Search and Entity Clarity follow the same pattern below)
 
     def _score_structured_data(self) -> Dict[str, Any]:
         """
@@ -235,27 +339,75 @@ class AEOAuditor:
 
     def _score_entity_clarity(self) -> Dict[str, Any]:
         """
-        Business name, location, industry, target audience, services, founder,
-        contact, social links, consistent brand language. Part 1 stub.
+        LLM-eval: how clearly does the website establish business identity for
+        an AI system reading the page cold? Checklist: business name visible,
+        location/service area, industry/category, target audience, services
+        offered, founder/team mention, contact info, consistent brand language.
         """
-        return {
-            "score":     50,
-            "issues":    [],
-            "strengths": [],
-            "detail":    "Part 1 stub — detection deferred to Part 2/B.",
-        }
+        result = self._llm_score(
+            "Entity Clarity",
+            "You are evaluating Entity Clarity for AEO scoring. Look at the "
+            "website content below. On a 0-100 scale, grade how clearly an AI "
+            "system can identify these eight signals: (1) business name, "
+            "(2) location or service area, (3) industry/category, (4) target "
+            "audience, (5) services offered, (6) founder or team, "
+            "(7) contact info (email/phone/form), (8) consistent brand language. "
+            "Each signal present = ~12 points. Penalize ambiguous identity, "
+            "missing fields, or contradictory descriptions across sections.",
+        )
+        if result is None:
+            return {"score": 50, "issues": [], "strengths": [],
+                    "detail": "LLM-eval skipped (no key or no page text)."}
+        score = result["score"]
+        issues, strengths = [], []
+        if score < 50:
+            issues.append("🔴 Entity identity is unclear to AI systems — "
+                          "name/location/services/contact need to be unambiguous")
+        elif score < 70:
+            issues.append("🟡 Some entity signals missing — "
+                          "tighten the homepage to surface all 8 identity fields")
+        else:
+            strengths.append(f"✅ Entity clarity strong ({score}/100) — "
+                             f"AI systems can confidently identify the business")
+        return {"score": score, "issues": issues, "strengths": strengths,
+                "detail": result["explain"]}
 
     def _score_conversational_search(self) -> Dict[str, Any]:
         """
-        Long-tail natural-language phrasing, 'near me' patterns, conversational
-        tone (LLM eval), snippetable 40-60 word answers. Phase B LLM category.
+        LLM-eval: does the content match how real people TYPE/SPEAK queries to
+        ChatGPT, Google AI Overviews, voice assistants? Checks: long-tail
+        natural-language phrasing, 'near me' / location patterns (when relevant),
+        conversational tone, snippetable 40-60 word answer chunks.
         """
-        return {
-            "score":     50,
-            "issues":    [],
-            "strengths": [],
-            "detail":    "LLM-eval category — deferred to Phase B.",
-        }
+        # Local-business hint: 'near me' patterns matter more for local clients
+        local_hint = " (this is a LOCAL business — 'near me' patterns + location specificity should weigh heavier)" if is_local_business(self.industry) else ""
+        result = self._llm_score(
+            "Conversational Search",
+            "You are evaluating Conversational Search readiness for AEO scoring."
+            f"{local_hint} Look at the website content below. On a 0-100 scale, "
+            "grade how well the content matches conversational query patterns "
+            "AI search engines extract. Reward: long-tail natural phrasing, "
+            "snippetable 40-60 word answer chunks, plain-language tone, "
+            "question-style language. Penalize: corporate jargon, walls of text, "
+            "list/bullet-only content with no narrative answers, content that "
+            "reads like a sales brochure rather than a conversation.",
+        )
+        if result is None:
+            return {"score": 50, "issues": [], "strengths": [],
+                    "detail": "LLM-eval skipped (no key or no page text)."}
+        score = result["score"]
+        issues, strengths = [], []
+        if score < 50:
+            issues.append("🔴 Content reads as marketing copy, not conversational — "
+                          "rewrite key sections in the language buyers actually search with")
+        elif score < 70:
+            issues.append("🟡 Tone mostly formal — add natural-language Q&A snippets "
+                          "for voice search and AI Overview extraction")
+        else:
+            strengths.append(f"✅ Conversational tone strong ({score}/100) — "
+                             f"matches how real users query AI search engines")
+        return {"score": score, "issues": issues, "strengths": strengths,
+                "detail": result["explain"]}
 
     def _score_trust_signals(self) -> Dict[str, Any]:
         """
