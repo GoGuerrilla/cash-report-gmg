@@ -142,6 +142,7 @@ from auditors import linkedin_scraper as _li_scraper
 from auditors.website_auditor import WebsiteAuditor
 from auditors.seo_auditor import SEOAuditor
 from auditors.geo_auditor import GEOAuditor
+from auditors.aeo_auditor import AEOAuditor
 from auditors.gbp_auditor import GBPAuditor
 from auditors.social_auditor import SocialMediaAuditor
 from auditors.content_auditor import ContentAuditor
@@ -1328,9 +1329,17 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
         audit_data["geo"], _ = _safe_audit_timed(
             "geo", lambda: GEOAuditor(config, audit_data.get("seo", {})).run(), _NEUTRAL)
         log.info("TIMING  geo_after_seo           %.2fs", time.time() - _t)
+
+        # AEO — third Visibility Score pillar (Phase 2 AEO Part 1 scaffold).
+        # Currently returns 50/100 neutral across all six categories until
+        # Part 2 wires real detection. Cheap to call (no LLM, no I/O).
+        _t = time.time()
+        audit_data["aeo"], _ = _safe_audit_timed(
+            "aeo", lambda: AEOAuditor(config, audit_data).run(), _NEUTRAL)
+        log.info("TIMING  aeo_after_geo           %.2fs", time.time() - _t)
     else:
-        log.warning("No website URL — skipping website/SEO/GEO/GBP/analytics auditors")
-        for key in ("website", "seo", "geo", "gbp", "analytics"):
+        log.warning("No website URL — skipping website/SEO/GEO/AEO/GBP/analytics auditors")
+        for key in ("website", "seo", "geo", "aeo", "gbp", "analytics"):
             audit_data[key] = {"note": "No website URL provided", "score": 50}
 
     log.info("TIMING  PHASE2_web_seo_parallel   %.2fs", time.time() - phase2_start)
