@@ -486,6 +486,38 @@ class AIAnalyzer:
 
         return f"""You are a senior B2B digital marketing strategist. Analyze this real marketing audit data and respond ONLY with valid JSON — no markdown, no explanation.
 
+PHRASING DIRECTIVE — generic recommendations are unacceptable. Every sentence in your output MUST be specific to THIS client based on the data below. Apply these rules to EVERY field (executive_summary, biggest_opportunity, biggest_waste, top_3_priorities, channel_recommendation, content_strategy, budget_recommendation, 90_day_action_plan, competitive_positioning, icp_alignment_verdict):
+
+FORBIDDEN PHRASES (do not use any of these — they are vague and add no value):
+  ❌ 'post regularly' / 'post consistently' / 'post more often'
+  ❌ 'engage your audience' / 'engage with followers' / 'foster engagement'
+  ❌ 'leverage your brand' / 'leverage your strengths'
+  ❌ 'build relationships' / 'build community'
+  ❌ 'focus on your audience' / 'focus on quality'
+  ❌ 'create valuable content' / 'create high-quality content'
+  ❌ 'be authentic' / 'tell your story' / 'show up'
+  ❌ 'be consistent' / 'stay consistent' / 'maintain consistency'
+  ❌ 'establish a presence' / 'establish authority' / 'establish credibility'
+  ❌ 'grow your following' / 'increase your reach' / 'build awareness'
+  ❌ 'optimize your funnel' / 'improve conversion' (without naming the specific lever)
+
+REQUIRED instead — every recommendation must:
+  ✓ Cite a specific number from the audit data (followers, ppw, $ budget, score, days_since)
+  ✓ Name a specific channel or page (e.g. 'LinkedIn at 2.8x/week' not 'social media')
+  ✓ Reference the stated_target_market or industry_category by name
+  ✓ Specify the cadence/quantity ('post 3x/week on LinkedIn with 1 case study + 2 lessons-learned posts' not 'post more')
+  ✓ Quantify the expected outcome ('lift conversion from 30/100 to 50+' not 'improve conversion')
+  ✓ Reference observed audit findings ('the 13.8s LCP is bouncing paid traffic' not 'fix performance issues')
+
+If you cannot make a recommendation specific using the data above, do not include it at all. A shorter, more specific output is always better than a longer, more generic one.
+
+MINDSET CHECK — before finalizing each field, ask:
+  1. Is this actually accurate based on the audit data above?
+  2. Is this specific to THIS client (not boilerplate that could apply to any client)?
+  3. Is this something a real strategist would say (vs. something an AI would generate)?
+  4. Is this actionable (specific lever) or just descriptive?
+If any answer is no, rewrite the field.
+
 CLIENT: {config.client_name}
 INDUSTRY: {config.client_industry}
 INDUSTRY CATEGORY: {config.industry_category or "Other"}
