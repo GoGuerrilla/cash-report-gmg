@@ -120,14 +120,55 @@ class AEOAuditor:
 
     def _score_question_coverage(self) -> Dict[str, Any]:
         """
-        Detects FAQ presence + question-format headings + common-question patterns
-        on page text. Part 1 stub — real detection in Part 2.
+        FAQ presence + question-format headings + common-question patterns.
+        Pulls signals from preloaded_channel_data["website"] (set by
+        _merge_website_data) and Apify content (apify_has_faqpage flag from
+        Push 4) — no re-scraping.
         """
+        site = (self.config.preloaded_channel_data or {}).get("website", {})
+        has_faqpage_schema = bool(site.get("apify_has_faqpage"))
+        # has_blog often correlates with Q&A content
+        has_blog = bool(site.get("has_blog"))
+        # Page text heuristic — count '?' question patterns in homepage h1/title text
+        pages = self.site.get("pages", []) or []
+        homepage = pages[0] if pages else {}
+        text_blob = " ".join([
+            homepage.get("title", "") or "",
+            homepage.get("meta_description", "") or "",
+            " ".join(homepage.get("h1_text", []) or []),
+        ])
+        h2_count = homepage.get("h2_count", 0) or 0
+        has_question_heading = "?" in text_blob
+
+        score = 35
+        issues, strengths = [], []
+
+        if has_faqpage_schema:
+            score += 30
+            strengths.append("✅ FAQPage schema detected — top format for AI citation")
+        else:
+            issues.append("🟡 No FAQPage schema — biggest single AEO lever")
+
+        if has_blog:
+            score += 15
+            strengths.append("✅ Blog/content hub present — supports Q&A long-form")
+        else:
+            issues.append("🟡 No blog or content hub visible — limits Q&A depth")
+
+        if has_question_heading:
+            score += 10
+            strengths.append("✅ Question-format heading detected on homepage")
+        elif h2_count >= 4:
+            score += 5
+            strengths.append("✅ Structured H2 hierarchy supports answer extraction")
+        else:
+            issues.append("🟡 No question-format headings — convert key H2s to questions")
+
         return {
-            "score":     50,
-            "issues":    [],
-            "strengths": [],
-            "detail":    "Part 1 stub — detection deferred to Part 2.",
+            "score":     max(0, min(100, score)),
+            "issues":    issues,
+            "strengths": strengths,
+            "detail":    f"FAQ schema={has_faqpage_schema} blog={has_blog} ?heading={has_question_heading}",
         }
 
     def _score_direct_answer_quality(self) -> Dict[str, Any]:
@@ -144,14 +185,52 @@ class AEOAuditor:
 
     def _score_structured_data(self) -> Dict[str, Any]:
         """
-        FAQPage / HowTo / QAPage / Article schema detection. Re-uses
-        _merge_website_data signals where possible. Part 1 stub.
+        FAQPage / HowTo / QAPage / Article schema detection. Reads schema_types
+        from the homepage Apify-rendered DOM (already extracted by website_auditor)
+        plus the apify_has_faqpage flag set in _merge_website_data.
         """
+        site = (self.config.preloaded_channel_data or {}).get("website", {})
+        pages = self.site.get("pages", []) or []
+        homepage = pages[0] if pages else {}
+        schema_types_lc = [
+            (s or "").lower() for s in (homepage.get("schema_types", []) or [])
+        ]
+
+        has_faqpage   = "faqpage" in schema_types_lc or bool(site.get("apify_has_faqpage"))
+        has_howto     = "howto" in schema_types_lc
+        has_qapage    = "qapage" in schema_types_lc
+        has_article   = any(t in schema_types_lc for t in ("article", "blogposting", "newsarticle"))
+        has_org       = any(t in schema_types_lc for t in ("organization", "localbusiness", "service"))
+
+        score = 30
+        issues, strengths = [], []
+
+        if has_faqpage:
+            score += 30
+            strengths.append("✅ FAQPage schema present — top AEO ranking signal")
+        else:
+            issues.append("🔴 No FAQPage schema — single highest-leverage AEO action")
+
+        if has_howto:
+            score += 15
+            strengths.append("✅ HowTo schema present — supports tutorial-style queries")
+        if has_qapage:
+            score += 10
+            strengths.append("✅ QAPage schema present — direct Q&A signal")
+        if has_article:
+            score += 10
+            strengths.append("✅ Article/BlogPosting schema present")
+        if has_org:
+            score += 10
+            strengths.append("✅ Organization/LocalBusiness/Service schema — entity baseline")
+        else:
+            issues.append("🟡 No Organization/LocalBusiness/Service schema — entity foundation missing")
+
         return {
-            "score":     50,
-            "issues":    [],
-            "strengths": [],
-            "detail":    "Part 1 stub — detection deferred to Part 2.",
+            "score":     max(0, min(100, score)),
+            "issues":    issues,
+            "strengths": strengths,
+            "detail":    f"schemas={schema_types_lc[:8]}",
         }
 
     def _score_entity_clarity(self) -> Dict[str, Any]:
@@ -180,16 +259,47 @@ class AEOAuditor:
 
     def _score_trust_signals(self) -> Dict[str, Any]:
         """
-        Re-scores existing has_testimonials, has_case_studies, has_certifications,
-        has_media_mentions, has_client_logos signals from _merge_website_data
-        under AEO weight. One source per signal — no re-detection.
-        Part 1 stub — real re-scoring in Part 2.
+        Re-scores existing trust signals from _merge_website_data under the AEO
+        weight. Same has_testimonials, has_case_studies, has_certifications,
+        has_media_mentions, has_client_logos booleans the Hold pillar uses —
+        no re-detection here, just a different weight on the existing facts
+        (per project_phase2_aeo_pillar.md: 'one source per signal').
         """
+        site = (self.config.preloaded_channel_data or {}).get("website", {})
+        signals = {
+            "testimonials":   bool(site.get("has_testimonials")),
+            "case_studies":   bool(site.get("has_case_studies")),
+            "certifications": bool(site.get("has_certifications")),
+            "media_mentions": bool(site.get("has_media_mentions")),
+            "client_logos":   bool(site.get("has_client_logos")),
+        }
+        present_count = sum(1 for v in signals.values() if v)
+
+        # 0 → 30 (poor floor), 1 → 50, 2 → 65, 3 → 80, 4 → 90, 5 → 95
+        tiers = {0: 30, 1: 50, 2: 65, 3: 80, 4: 90, 5: 95}
+        score = tiers.get(present_count, 95)
+
+        issues, strengths = [], []
+        if signals["testimonials"]:
+            strengths.append("✅ Testimonials present — direct trust signal for AI citation")
+        else:
+            issues.append("🔴 No testimonials — AI systems discount unverified expertise claims")
+        if signals["case_studies"]:
+            strengths.append("✅ Case studies present — outcome-focused content boosts AI trust")
+        else:
+            issues.append("🟡 No case studies — add 1-2 outcome stories for AEO depth")
+        if signals["certifications"]:
+            strengths.append("✅ Certifications visible — credentials reinforce authority")
+        if signals["media_mentions"]:
+            strengths.append("✅ Media mentions present — third-party authority signal")
+        if signals["client_logos"]:
+            strengths.append("✅ Client logos present — social proof at a glance")
+
         return {
-            "score":     50,
-            "issues":    [],
-            "strengths": [],
-            "detail":    "Part 1 stub — re-scoring deferred to Part 2.",
+            "score":     score,
+            "issues":    issues,
+            "strengths": strengths,
+            "detail":    f"present={present_count}/5  signals={signals}",
         }
 
 
