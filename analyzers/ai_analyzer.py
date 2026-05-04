@@ -144,6 +144,7 @@ class AIAnalyzer:
                     if val is not None and val != "" and val != [] and val != {}:
                         base[key] = val
                 self._check_and_blend_scores(base, rb_scores)
+                self._maybe_override_industry(config, ai_result)
                 base["data_source"] = "claude"
             else:
                 print("   ⚠️  Claude response could not be parsed — scores kept, narrative empty")
@@ -156,6 +157,7 @@ class AIAnalyzer:
                     if val is not None and val != "" and val != [] and val != {}:
                         base[key] = val
                 self._check_and_blend_scores(base, rb_scores)
+                self._maybe_override_industry(config, ai_result)
                 base["data_source"] = "openai"
             else:
                 print("   ⚠️  OpenAI response could not be parsed — scores kept, narrative empty")
@@ -164,6 +166,38 @@ class AIAnalyzer:
             base["data_source"] = "rule_based"
 
         return base
+
+    def _maybe_override_industry(self, config: ClientConfig, ai_result: Dict) -> None:
+        """
+        Push 6 Stage 2 — when the AI synthesis returns an industry_category that
+        differs from the keyword/SEO-signal classification AND normalizes to a
+        non-'Other' canonical category, override config.industry_category and
+        config.client_industry. This catches edge cases where keyword + SEO-
+        signal fallback both miss (e.g., admin-portal triggers with sparse intake
+        and opaque brand names).
+
+        Only fires when AI is confident enough to pick a non-Other label.
+        Logged so the override is traceable in Railway.
+        """
+        ai_category = (ai_result.get("industry_category") or "").strip()
+        if not ai_category:
+            return
+        canon = industry_label(ai_category)
+        if canon == "Other":
+            return
+        current = (config.industry_category or "Other").strip()
+        if canon == current:
+            return
+        import logging
+        log = logging.getLogger(__name__)
+        log.info(
+            "Industry overridden by AI synthesis: '%s' → '%s' (was '%s')",
+            current, canon, config.client_industry,
+        )
+        config.industry_category = canon
+        # Also update client_industry so the report cover and downstream
+        # consumers reflect the AI's choice consistently.
+        config.client_industry = canon
 
     def _check_and_blend_scores(self, result: dict, rb_scores: dict) -> None:
         """
@@ -529,6 +563,7 @@ TOP STRENGTHS FOUND:
 
 Respond with ONLY this exact JSON (no markdown fences, no extra keys):
 {{
+  "industry_category": "Pick ONE canonical category from this list that BEST describes THIS CLIENT's own business (not their target market). Allowed values: 'Financial Advisory' | 'Legal' | 'Accounting & CPA' | 'Healthcare & Medical' | 'Restaurant & Food Service' | 'Retail & E-commerce' | 'Home Services & Trades' | 'Real Estate' | 'Beauty & Wellness' | 'Personal Brand & Creator' | 'Coach, Speaker & Author' | 'Startup & Early-stage' | 'SaaS & Tech' | 'Agency & Consulting' | 'Non-profit & Cause' | 'Professional B2B Services' | 'Other'. The keyword classifier may have already picked one — only override if you are confident a different category is more accurate based on the website copy + business name. Use 'Other' if you cannot determine confidently.",
   "cover_topline": "ONE complete sentence (max 180 chars) that captures the single most important strategic insight for this client. MUST read as a finished, standalone thought — it appears in a fixed-size cover banner and cannot be truncated. Do NOT use 'and' as a fragment ending. Example shape: 'X is spending $Y/month on Z while [problem]; the highest-leverage move is [action].'",
   "executive_summary": "2-3 sentences summarizing the most critical finding and the single highest-leverage action, specific to this client's data",
   "overall_grade": "A/B/C/D/F",
