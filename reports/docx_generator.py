@@ -588,9 +588,9 @@ class DocxReportGenerator:
                 "recent":           "✅ Recent",
                 "stale":            "⚠️ Stale",
                 "dead":             "🔴 Inactive",
-                "unknown":          "— Unknown",
+                "unknown":          "— Unverified",
                 "unknown_inactive": "— Unverified",
-                "api_blocked":      "— Requires intake or API",
+                "api_blocked":      "— Unverified",
             }
             self._detail_table(doc, ["CHANNEL", "STATUS", "POSTS/WEEK", "DAYS SINCE POST"], [
                 (p,
@@ -783,7 +783,7 @@ class DocxReportGenerator:
         def _fmt_p(v):   return str(v) if v is not None else "—"
         def _fmt_d(v):   return str(v) if v is not None else "—"
         def _active(ppw, v30=None, pending=False):
-            if pending:     return "Pending API"
+            if pending:     return "Unverified"
             if (ppw is not None and ppw >= 1) or (v30 is not None and v30 >= 4):
                 return "✅ Yes"
             if (ppw is not None and ppw > 0) or (v30 is not None and v30 >= 1):
@@ -832,7 +832,7 @@ class DocxReportGenerator:
                     _active(fb.get("posts_per_week")),
                 ))
             else:
-                snap_rows.append(("Facebook", "—", "—", "—", "Pending API"))
+                snap_rows.append(("Facebook", "—", "—", "—", "Unverified"))
 
         if self.config.instagram_handle:
             ig = ch_data.get("instagram", {})
@@ -846,7 +846,7 @@ class DocxReportGenerator:
                     _active(ig.get("posts_per_week")),
                 ))
             else:
-                snap_rows.append(("Instagram", "—", "—", "—", "Pending API"))
+                snap_rows.append(("Instagram", "—", "—", "—", "Unverified"))
 
         if self.config.tiktok_handle:
             tt = ch_data.get("tiktok", {})
@@ -860,7 +860,7 @@ class DocxReportGenerator:
                     _active(tt.get("posts_per_week")),
                 ))
             else:
-                snap_rows.append(("TikTok", "—", "—", "—", "Pending API"))
+                snap_rows.append(("TikTok", "—", "—", "—", "Unverified"))
 
         if self.config.twitter_handle:
             tw = ch_data.get("twitter", {})
@@ -874,7 +874,7 @@ class DocxReportGenerator:
                     _active(tw.get("posts_per_week")),
                 ))
             else:
-                snap_rows.append(("X", "—", "—", "—", "Pending API"))
+                snap_rows.append(("X", "—", "—", "—", "Unverified"))
 
         if snap_rows:
             self._subsection(doc, "Social Media Snapshot")

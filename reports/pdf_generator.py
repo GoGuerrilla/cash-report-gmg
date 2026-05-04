@@ -809,7 +809,7 @@ class PDFReportGenerator:
             elif status_raw == "dead":
                 dot, badge = _sdot("r"), _sbadge("critical", "Inactive")
             else:
-                dot, badge = _sdot("gray"), _sbadge("gray", "API Required")
+                dot, badge = _sdot("gray"), _sbadge("gray", "Unverified")
             ppw_str  = f'<span class="td-good">{ppw}</span>'  if ppw  else "—"
             days_str = f'<span class="td-good">{days}</span>' if days is not None else "—"
             freshness_tbody += (f'<tr>'
@@ -950,7 +950,7 @@ class PDFReportGenerator:
 
         def _active_badge(ppw, days, v30=None, pending=False):
             if pending:
-                return _sbadge("gray", "Pending API")
+                return _sbadge("gray", "Unverified")
             if (ppw is not None and ppw >= 1) or (v30 is not None and v30 >= 4):
                 return f'{_sdot("g")}{_sbadge("ok", "Yes")}'
             if (ppw is not None and ppw > 0) or (v30 is not None and v30 >= 1):
@@ -1004,7 +1004,7 @@ class PDFReportGenerator:
                 ))
             else:
                 snap_rows.append(("Facebook", "—", "—", "—",
-                                  _sbadge("gray", "Pending API")))
+                                  _sbadge("gray", "Unverified")))
 
         # Instagram — Apify (or Meta API) data when present, else Pending
         if self.config.instagram_handle:
@@ -1021,7 +1021,7 @@ class PDFReportGenerator:
                 ))
             else:
                 snap_rows.append(("Instagram", "—", "—", "—",
-                                  _sbadge("gray", "Pending API")))
+                                  _sbadge("gray", "Unverified")))
 
         # TikTok — Apify-only path
         if self.config.tiktok_handle:
@@ -1038,7 +1038,7 @@ class PDFReportGenerator:
                 ))
             else:
                 snap_rows.append(("TikTok", "—", "—", "—",
-                                  _sbadge("gray", "Pending API")))
+                                  _sbadge("gray", "Unverified")))
 
         # X (Twitter) — Apify-only path
         if self.config.twitter_handle:
@@ -1055,7 +1055,7 @@ class PDFReportGenerator:
                 ))
             else:
                 snap_rows.append(("X", "—", "—", "—",
-                                  _sbadge("gray", "Pending API")))
+                                  _sbadge("gray", "Unverified")))
 
         if snap_rows:
             snap_tbody = "".join(
