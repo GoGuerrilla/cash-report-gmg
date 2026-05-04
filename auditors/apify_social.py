@@ -451,9 +451,12 @@ def fetch_twitter_tweets(handle_or_url: str) -> Dict[str, Any]:
 
     cadence = _cadence_from_dates(pub_dates)
 
-    if cadence["posts_per_week"] is None and not recent_posts:
+    # Diagnostic: if we got tweet items but couldn't parse any date, the
+    # actor uses a date field name not in our defensive list. Dump the first
+    # item's keys so we can see which field to add.
+    if cadence["posts_per_week"] is None and items:
         _log_schema_sample(f"twitter_tweets:{handle}", items,
-                           ["recent_posts", "posts_per_week"])
+                           ["posts_per_week", "days_since_last_post"])
 
     log.info(
         "apify_social twitter_tweets handle=%r recent=%d ppw=%s days_since=%s",

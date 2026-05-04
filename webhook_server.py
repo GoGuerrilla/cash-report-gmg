@@ -1119,21 +1119,24 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
                         config.twitter_handle, exc)
             channel_data["twitter"]["data_source"] = "apify_scrape_failed"
 
-        # Premium follower-count enricher — runs even if main scraper failed,
-        # so we still get the follower count when the cheaper actor doesn't
-        # return profile metadata.
-        try:
-            log.info("Apify X followers fetch: handle=%r", config.twitter_handle)
-            _t = time.time()
-            tw_followers = apify_social.fetch_twitter_followers(config.twitter_handle)
-            log.info("TIMING  apify_twitter_followers %.2fs", time.time() - _t)
-            if tw_followers.get("followers") is not None:
-                channel_data["twitter"]["followers"] = tw_followers["followers"]
-                log.info("X followers (premium): %s",
-                         tw_followers["followers"])
-        except Exception as exc:
-            log.warning("Apify X followers fetch failed for %r: %s",
-                        config.twitter_handle, exc)
+        # Premium follower-count enricher — only fires as fallback when the
+        # main scraping_solutions actor didn't already produce a count. The
+        # kaitoeasy actor caps at maxFollowers=200 so it's less accurate than
+        # scraping_solutions (which we run at resultsLimit=5000); preserving
+        # the higher-fidelity number is more important than cross-checking.
+        if channel_data["twitter"].get("followers") is None:
+            try:
+                log.info("Apify X followers fetch: handle=%r", config.twitter_handle)
+                _t = time.time()
+                tw_followers = apify_social.fetch_twitter_followers(config.twitter_handle)
+                log.info("TIMING  apify_twitter_followers %.2fs", time.time() - _t)
+                if tw_followers.get("followers") is not None:
+                    channel_data["twitter"]["followers"] = tw_followers["followers"]
+                    log.info("X followers (premium fallback): %s",
+                             tw_followers["followers"])
+            except Exception as exc:
+                log.warning("Apify X followers fetch failed for %r: %s",
+                            config.twitter_handle, exc)
 
         # X tweet timeline enricher — fills in posts_per_week + days_since_last_post
         # since the followers/followings actor doesn't return tweet timeline.
