@@ -522,6 +522,7 @@ class PDFReportGenerator:
             self._page_sales(),
             self._page_hold(),
             self._page_geo(),
+            self._page_aeo(),
             self._page_gbp_competitive(),
             self._page_action_plan(),
             self._page_cta(),
@@ -1413,7 +1414,71 @@ class PDFReportGenerator:
 
         return _pg(9, body, self.date_str, self.logo_src)
 
-    # ── PAGE 10: GBP + Competitive ────────────────────────────────────────────
+    # ── PAGE 10: AEO (Answer Engine Optimisation) ─────────────────────────────
+
+    def _page_aeo(self) -> str:
+        aeo = self.data.get("aeo", {})
+        aeo_score = aeo.get("score", 50)
+        aeo_grade = _grade(aeo_score)
+        band      = aeo.get("band", "moderate")
+
+        # Component table — 6 categories with their weights + scores
+        comps   = aeo.get("components", {})
+        weights = aeo.get("weights", {})
+        comp_tbody = ""
+        for name, comp in comps.items():
+            sc   = comp.get("score", 50)
+            g    = _grade(sc)
+            gcls = _gc(g)
+            sc_cls = ("td-good" if sc >= 65 else "td-warn" if sc >= 50 else "td-bad")
+            wt = weights.get(name, 0.0)
+            wt_str = f"{int(wt * 100)}%" if wt else "—"
+            comp_tbody += (f'<tr>'
+                           f'<td class="td-name">{_h(name)}</td>'
+                           f'<td>{wt_str}</td>'
+                           f'<td class="{sc_cls}">{sc}/100</td>'
+                           f'<td><span class="sc-grade {gcls}">{g}</span></td>'
+                           f'</tr>')
+
+        comp_table = (
+            f'<table class="data-table">'
+            f'<thead><tr><th>Category</th><th>Weight</th>'
+            f'<th>Score</th><th>Grade</th></tr></thead>'
+            f'<tbody>{comp_tbody}</tbody></table>'
+        ) if comp_tbody else ""
+
+        # Pull the apify_has_faqpage signal so readers see the single
+        # highest-leverage AEO action's status at a glance.
+        site = self.config.preloaded_channel_data.get("website", {}) if self.config.preloaded_channel_data else {}
+        has_faqpage = bool(site.get("apify_has_faqpage"))
+        faq_field = (
+            f'{_sdot("g")}<span class="td-good">Detected</span>'
+            if has_faqpage else
+            f'{_sdot("r")}<span class="td-bad">Missing — top AEO priority</span>'
+        )
+
+        section_hdr = _section_hdr(
+            "AEO",
+            "Answer Engine Optimisation",
+            "How well are you positioned to be CHOSEN as the answer by AI search engines?",
+            aeo_score,
+            aeo_grade,
+        )
+        body = (
+            f'{section_hdr}'
+            f'<div class="text-body" style="font-size:12px;color:rgba(255,255,255,.6);margin-bottom:14px">'
+            f'AEO measures whether ChatGPT, Google AI Overviews, Perplexity, and voice search '
+            f'choose your content as the answer. Counts for 25% of your overall Visibility Score.'
+            f'</div>'
+            f'{_sub("AEO Component Breakdown")}'
+            f'{comp_table}'
+            f'{_sub("Critical AEO Signal")}'
+            f'<table class="field-table"><tbody>{_field("FAQPage Schema", faq_field)}</tbody></table>'
+            f'{_split_table(aeo.get("issues", []), aeo.get("strengths", []))}'
+        )
+        return _pg(10, body, self.date_str, self.logo_src)
+
+    # ── PAGE 11: GBP + Competitive ────────────────────────────────────────────
 
     def _page_gbp_competitive(self) -> str:
         gbp  = self.data.get("gbp", {})
@@ -1557,9 +1622,9 @@ class PDFReportGenerator:
         if insights:
             body += f'<div class="strategy-box">{_h(insights[0])}</div>'
 
-        return _pg(10, body, self.date_str, self.logo_src)
+        return _pg(11, body, self.date_str, self.logo_src)
 
-    # ── PAGE 11: 90-Day Action Plan ───────────────────────────────────────────
+    # ── PAGE 12: 90-Day Action Plan ───────────────────────────────────────────
 
     def _page_action_plan(self) -> str:
         ai    = self.ai
@@ -1617,9 +1682,9 @@ class PDFReportGenerator:
             f'{_phase_block("orange", 2, "Authority — Build Proof & Pipeline",          "Days 31–60", phase2_rows)}'
             f'{_phase_block("cyan",   3, "Scale — Systems, Retention & Review",         "Days 61–90", phase3_rows)}'
         )
-        return _pg(11, body, self.date_str, self.logo_src)
+        return _pg(12, body, self.date_str, self.logo_src)
 
-    # ── PAGE 12: CTA ──────────────────────────────────────────────────────────
+    # ── PAGE 13: CTA ──────────────────────────────────────────────────────────
 
     def _page_cta(self) -> str:
         body = (
@@ -1678,4 +1743,4 @@ class PDFReportGenerator:
             f'Book at <strong>www.gogmg.net/meeting</strong> · Report by C.A.S.H. Report by GMG · Confidential</div>'
             f'</div>'
         )
-        return _pg(12, body, self.date_str, self.logo_src)
+        return _pg(13, body, self.date_str, self.logo_src)
