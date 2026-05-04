@@ -908,10 +908,25 @@ Respond with ONLY this exact JSON (no markdown fences, no extra keys):
                    stage_score(stages.get("trust",   {}))) / 2)
 
         overall = round(c * 0.20 + a * 0.30 + s * 0.30 + h * 0.20)
+
+        # Visibility Score — composite of SEO + GEO + AEO per the AEO pillar
+        # spec (project_phase2_aeo_pillar.md). Single number that summarises
+        # how well this client is positioned to be FOUND (SEO) + UNDERSTOOD by
+        # AI systems (GEO) + CHOSEN as the answer (AEO). Differentiates the
+        # report from competitors stuck at SEO-only scoring.
+        seo_score = audit_data.get("seo", {}).get("score", 50)
+        geo_score = audit_data.get("geo", {}).get("score", 50)
+        aeo_score = audit_data.get("aeo", {}).get("score", 50)
+        visibility = round(seo_score * 0.40 + geo_score * 0.35 + aeo_score * 0.25)
+
         # Surface social_score so PDF/DOCX renderers can show it as the
         # "Social Media Content & Audience" line in the Content Freshness section.
         return {"C": c, "A": a, "S": s, "H": h, "overall": overall,
-                "social_audience": social_score}
+                "social_audience":  social_score,
+                "visibility":       visibility,
+                "visibility_seo":   seo_score,
+                "visibility_geo":   geo_score,
+                "visibility_aeo":   aeo_score}
 
     # ── Rule-based baseline ───────────────────────────────────
 

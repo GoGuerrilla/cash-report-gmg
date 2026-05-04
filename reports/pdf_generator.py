@@ -140,6 +140,17 @@ body{font-family:'Barlow',sans-serif;background:var(--dark);color:#fff;margin:0}
 .osb-score{font-family:'Barlow Condensed',sans-serif;font-size:48px;font-weight:800;color:#fff;line-height:1}
 .osb-score span{font-size:18px;font-weight:400;color:rgba(255,255,255,.35)}
 .osb-desc{font-size:12px;color:rgba(255,255,255,.5);margin-top:4px}
+.visibility-strip{background:rgba(0,174,239,.06);border:1px solid rgba(0,174,239,.25);border-radius:2px;padding:14px 18px;margin:14px 0}
+.vs-title{font-size:10px;font-weight:700;letter-spacing:3px;color:var(--cyan);text-transform:uppercase;margin-bottom:10px;text-align:center}
+.vs-row{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.vs-cell{flex:1;text-align:center;padding:6px 4px}
+.vs-cell.vs-total{background:rgba(0,174,239,.18);border-radius:2px;padding:8px 4px}
+.vs-label{font-size:9px;font-weight:700;letter-spacing:1.5px;color:rgba(255,255,255,.55);text-transform:uppercase;margin-bottom:4px}
+.vs-score{font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:700;color:#fff;line-height:1}
+.vs-score-total{font-family:'Barlow Condensed',sans-serif;font-size:30px;font-weight:800;color:var(--cyan);line-height:1}
+.vs-score-total span{font-size:14px;font-weight:400;color:rgba(0,174,239,.5)}
+.vs-plus,.vs-equals{font-size:16px;color:rgba(255,255,255,.35);font-weight:300}
+.vs-caption{font-size:10px;color:rgba(255,255,255,.4);text-align:center;margin-top:8px;letter-spacing:0.5px}
 .callout-cyan{background:linear-gradient(135deg,rgba(0,174,239,.12),rgba(0,174,239,.04));border:1px solid rgba(0,174,239,.28);border-left:4px solid var(--cyan);padding:16px 20px;border-radius:2px;margin-bottom:14px;break-inside:avoid}
 .callout-red{background:linear-gradient(135deg,rgba(231,76,60,.1),rgba(231,76,60,.03));border:1px solid rgba(231,76,60,.25);border-left:4px solid var(--red);padding:16px 20px;border-radius:2px;margin-bottom:14px;break-inside:avoid}
 .callout-green{background:linear-gradient(135deg,rgba(39,174,96,.1),rgba(39,174,96,.03));border:1px solid rgba(39,174,96,.25);border-left:4px solid var(--green);padding:16px 20px;border-radius:2px;margin-bottom:14px;break-inside:avoid}
@@ -574,6 +585,7 @@ class PDFReportGenerator:
             f'<div class="cover-divider"></div>'
             f'{self._overall_banner()}'
             f'{self._score_strip()}'
+            f'{self._visibility_strip()}'
             f'<div class="cover-meta">'
             f'<div><strong>Prepared by:</strong> {_h(cfg.agency_name)}</div>'
             f'<div><strong>Date:</strong> {_h(self.date_str)}</div>'
@@ -582,6 +594,35 @@ class PDFReportGenerator:
             f'</div>'
         )
         return _pg(1, body, self.date_str, self.logo_src)
+
+    def _visibility_strip(self) -> str:
+        """
+        Three-pillar Visibility Score row: SEO + GEO + AEO with the composite
+        on the right. Lives under the C.A.S.H. score strip on the cover so the
+        reader sees both axes at a glance: pillar performance (CASH) and
+        AI/search visibility (Visibility).
+        """
+        v = self.cash.get("visibility")
+        if v is None:
+            return ""   # graceful fallback — older audits without AEO
+        seo = self.cash.get("visibility_seo", 50)
+        geo = self.cash.get("visibility_geo", 50)
+        aeo = self.cash.get("visibility_aeo", 50)
+        return (
+            f'<div class="visibility-strip">'
+            f'<div class="vs-title">VISIBILITY SCORE</div>'
+            f'<div class="vs-row">'
+            f'<div class="vs-cell"><div class="vs-label">SEO · 40%</div><div class="vs-score">{seo}/100</div></div>'
+            f'<div class="vs-plus">+</div>'
+            f'<div class="vs-cell"><div class="vs-label">GEO · 35%</div><div class="vs-score">{geo}/100</div></div>'
+            f'<div class="vs-plus">+</div>'
+            f'<div class="vs-cell"><div class="vs-label">AEO · 25%</div><div class="vs-score">{aeo}/100</div></div>'
+            f'<div class="vs-equals">=</div>'
+            f'<div class="vs-cell vs-total"><div class="vs-label">VISIBILITY</div><div class="vs-score-total">{v}<span>/100</span></div></div>'
+            f'</div>'
+            f'<div class="vs-caption">SEO finds you · GEO summarises you · AEO chooses you as the answer</div>'
+            f'</div>'
+        )
 
     # ── PAGE 2: Framework ─────────────────────────────────────────────────────
 
