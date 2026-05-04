@@ -1038,6 +1038,22 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
                         config.twitter_handle, exc)
             channel_data["twitter"]["data_source"] = "apify_scrape_failed"
 
+        # Premium follower-count enricher — runs even if main scraper failed,
+        # so we still get the follower count when the cheaper actor doesn't
+        # return profile metadata.
+        try:
+            log.info("Apify X followers fetch: handle=%r", config.twitter_handle)
+            _t = time.time()
+            tw_followers = apify_social.fetch_twitter_followers(config.twitter_handle)
+            log.info("TIMING  apify_twitter_followers %.2fs", time.time() - _t)
+            if tw_followers.get("followers") is not None:
+                channel_data["twitter"]["followers"] = tw_followers["followers"]
+                log.info("X followers (premium): %s",
+                         tw_followers["followers"])
+        except Exception as exc:
+            log.warning("Apify X followers fetch failed for %r: %s",
+                        config.twitter_handle, exc)
+
     # Facebook — fallback when Meta Graph API didn't populate
     if config.facebook_page_url and channel_data["facebook"].get("is_active") is not True:
         try:
@@ -1050,6 +1066,23 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
             log.warning("Apify FB fetch failed for %r: %s",
                         config.facebook_page_url, exc)
             channel_data["facebook"]["data_source"] = "apify_scrape_failed"
+
+        # Page-level follower count — apify/facebook-posts-scraper is post-only
+        # so we run apify/facebook-followers-following-scraper as a separate
+        # actor. Same is_active gate so we don't burn the actor when Meta path
+        # already populated.
+        try:
+            log.info("Apify FB followers fetch: page=%r", config.facebook_page_url)
+            _t = time.time()
+            fb_followers = apify_social.fetch_facebook_followers(config.facebook_page_url)
+            log.info("TIMING  apify_facebook_followers %.2fs", time.time() - _t)
+            if fb_followers.get("followers") is not None:
+                channel_data["facebook"]["followers"] = fb_followers["followers"]
+                log.info("Facebook followers (Apify): %s",
+                         fb_followers["followers"])
+        except Exception as exc:
+            log.warning("Apify FB followers fetch failed for %r: %s",
+                        config.facebook_page_url, exc)
 
     log.info("TIMING  PHASE1_social_collection  %.2fs", time.time() - phase1_start)
 

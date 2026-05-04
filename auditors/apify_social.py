@@ -50,11 +50,16 @@ log = logging.getLogger(__name__)
 # Actor slugs — Apify URL form uses ~ instead of /
 # ─────────────────────────────────────────────────────────────────────────────
 
-_ACTOR_INSTAGRAM   = "apify~instagram-scraper"
-_ACTOR_TIKTOK      = "clockworks~tiktok-scraper"
-_ACTOR_TWITTER     = "apidojo~twitter-scraper-lite"
-_ACTOR_FB_POSTS    = "apify~facebook-posts-scraper"
-_ACTOR_FB_COMMENTS = "apify~facebook-comments-scraper"  # Phase 2
+_ACTOR_INSTAGRAM         = "apify~instagram-scraper"
+_ACTOR_TIKTOK            = "clockworks~tiktok-scraper"
+# Replaced apidojo/twitter-scraper-lite (returned only {'demo': ...} placeholder
+# data) with apidojo/twitter-user-scraper — the full user-scraper variant returns
+# real profile + recent tweets per handle. Approved by Dave 2026-05-03.
+_ACTOR_TWITTER           = "apidojo~twitter-user-scraper"
+_ACTOR_TWITTER_FOLLOWERS = "kaitoeasyapi~premium-x-follower-scraper-following-data"
+_ACTOR_FB_POSTS          = "apify~facebook-posts-scraper"
+_ACTOR_FB_FOLLOWERS      = "apify~facebook-followers-following-scraper"
+_ACTOR_FB_COMMENTS       = "apify~facebook-comments-scraper"  # Phase 2
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Call parameters
@@ -273,6 +278,97 @@ def fetch_facebook_posts(page_url: str) -> Dict[str, Any]:
     }
     items = _retry_call(_ACTOR_FB_POSTS, payload, f"facebook:{page_slug}")
     return _normalize_facebook(items, page_slug, page_url)
+
+
+def fetch_twitter_followers(handle_or_url: str) -> Dict[str, Any]:
+    """
+    Premium X follower-count fetcher via kaitoeasyapi/premium-x-follower-scraper-following-data.
+    Use as a complement to fetch_twitter() — that actor returns tweets, this one
+    returns the page-level follower / following counts that the tweet-scraper
+    sometimes drops. Higher per-call cost but reliable for the count.
+
+    Returns: {handle, followers, following, raw_count, data_source, scraped_at}
+    """
+    if not (handle_or_url or "").strip():
+        raise RuntimeError("apify_social_failed — twitter_followers: empty input")
+
+    raw = handle_or_url.strip().lstrip("@").rstrip("/")
+    handle = raw.split("/")[-1] if "/" in raw else raw
+
+    # Schema unverified — accept multiple common input shapes; the actor will
+    # tolerate the right one and ignore the others.
+    payload = {
+        "handles":        [handle],
+        "twitterHandles": [handle],
+        "usernames":      [handle],
+        "maxItems":       1,
+    }
+    items = _retry_call(_ACTOR_TWITTER_FOLLOWERS, payload, f"twitter_followers:{handle}")
+
+    first = items[0] if items else {}
+    # Defensive: try multiple common field names. Diagnostic logger will surface
+    # the actual schema on first run if these all miss.
+    followers  = (first.get("followers")
+                  or first.get("followersCount")
+                  or first.get("follower_count")
+                  or first.get("followers_count") or None)
+    following  = (first.get("following")
+                  or first.get("followingCount")
+                  or first.get("following_count") or None)
+
+    if followers is None:
+        _log_schema_sample(f"twitter_followers:{handle}", items, ["followers"])
+
+    return {
+        "handle":      f"@{handle}",
+        "followers":   followers,
+        "following":   following,
+        "data_source": "apify_kaitoeasyapi_premium_x_follower_scraper",
+        "scraped_at":  _now_iso(),
+        "raw_count":   len(items),
+    }
+
+
+def fetch_facebook_followers(page_url: str) -> Dict[str, Any]:
+    """
+    Page-level follower-count fetcher via apify/facebook-followers-following-scraper.
+    Use as a complement to fetch_facebook_posts() — that actor is post-only and
+    drops follower count entirely.
+
+    Returns: {page_url, followers, following, raw_count, data_source, scraped_at}
+    """
+    if not (page_url or "").strip():
+        raise RuntimeError("apify_social_failed — facebook_followers: empty input")
+
+    page_url = page_url.strip().rstrip("/")
+    page_slug = page_url.rsplit("/", 1)[-1] or page_url
+
+    payload = {
+        "startUrls":  [{"url": page_url}],
+        "maxItems":   1,
+    }
+    items = _retry_call(_ACTOR_FB_FOLLOWERS, payload, f"facebook_followers:{page_slug}")
+
+    first = items[0] if items else {}
+    followers  = (first.get("followers")
+                  or first.get("followersCount")
+                  or first.get("followerCount")
+                  or first.get("pageFollowers") or None)
+    following  = (first.get("following")
+                  or first.get("followingCount")
+                  or first.get("likes") or None)   # FB pages: likes is a near-equivalent
+
+    if followers is None:
+        _log_schema_sample(f"facebook_followers:{page_slug}", items, ["followers"])
+
+    return {
+        "page_url":    page_url,
+        "followers":   followers,
+        "following":   following,
+        "data_source": "apify_facebook_followers_following_scraper",
+        "scraped_at":  _now_iso(),
+        "raw_count":   len(items),
+    }
 
 
 def fetch_facebook_comments(post_urls: List[str]) -> Dict[str, Any]:
