@@ -478,46 +478,42 @@ def _normalize_facebook(
     items: List[Dict], page_slug: str, page_url: str,
 ) -> Dict[str, Any]:
     """
-    apify/facebook-posts-scraper returns a list of post dicts. Page-level data
-    (followers, name) sometimes appears on each post via .pageInfo or top-level.
+    apify/facebook-posts-scraper returns post-level dicts ONLY — no page-level
+    metadata (no follower count, no page bio). Verified actor schema 2026-05-03:
+      top-level: collaborators, facebookId, facebookUrl, feedbackId, inputUrl,
+                 likes, media, pageAdLibrary, pageName, postId, shares, text,
+                 time, timestamp, topLevelUrl, topReactionsCount, url, user
+      nested user: {id, name, profilePic, profileUrl}
+    For follower count, run apify/facebook-pages-scraper as a separate actor.
     """
     if not isinstance(items, list):
         items = []
 
     first = items[0] if items else {}
-    page_info = first.get("pageInfo") or {}
-    followers  = (page_info.get("followers")
-                  or page_info.get("followersCount")
-                  or first.get("pageFollowers") or None)
-    post_count = (page_info.get("postsCount") or None)
-    bio        = (page_info.get("description") or page_info.get("about") or "").strip()
+    # Followers + post_count are NOT available from this actor — leave None.
+    # The actor is post-only; the report renderer accepts None gracefully.
+    followers  = None
+    post_count = None
+    # Page name is the closest thing to a "bio" we can surface
+    bio        = (first.get("pageName") or "").strip()
 
     recent_posts: List[Dict] = []
     pub_dates: List[datetime] = []
     for it in items[:_RESULTS_LIMIT]:
-        published = it.get("time") or it.get("publishedTime") or it.get("timestamp")
+        published = it.get("time") or it.get("timestamp")
         d = _parse_iso(published)
         if d:
             pub_dates.append(d)
         recent_posts.append({
-            "url":        it.get("url") or it.get("postUrl"),
-            "text":       it.get("text") or it.get("message") or "",
+            "url":        it.get("url") or it.get("topLevelUrl"),
+            "text":       it.get("text") or "",
             "published":  published,
-            "likes":      it.get("likesCount") or it.get("reactionsCount"),
-            "comments":   it.get("commentsCount"),
-            "shares":     it.get("sharesCount"),
+            "likes":      it.get("likes"),
+            "reactions":  it.get("topReactionsCount"),
+            "shares":     it.get("shares"),
         })
 
     cadence = _cadence_from_dates(pub_dates)
-
-    # Diagnostic: surface actor's actual schema when expected fields came back None
-    _missing = [name for name, val in (
-        ("followers", followers),
-        ("post_count", post_count),
-    ) if val is None]
-    if _missing:
-        _log_schema_sample(f"facebook:{page_slug}", items, _missing)
-
     return {
         "platform":             "Facebook",
         "handle":               page_slug,
