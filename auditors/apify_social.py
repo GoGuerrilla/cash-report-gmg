@@ -55,10 +55,10 @@ _ACTOR_INSTAGRAM           = "apify~instagram-scraper"
 _ACTOR_IG_FOLLOWERS        = "apify~instagram-followers-count-scraper"
 _ACTOR_IG_POSTS            = "apify~instagram-post-scraper"
 _ACTOR_TIKTOK              = "clockworks~tiktok-scraper"
-# Replaced apidojo/twitter-scraper-lite (returned only {'demo': ...} placeholder
-# data) with apidojo/twitter-user-scraper — the full user-scraper variant returns
-# real profile + recent tweets per handle. Approved by Dave 2026-05-03.
-_ACTOR_TWITTER             = "apidojo~twitter-user-scraper"
+# Replaced apidojo/twitter-scraper-lite (returned only {'demo': ...} placeholder)
+# and then apidojo/twitter-user-scraper (also returned demo) with mikolabs/
+# tweets-x-scraper — Nitter-backed scraper Dave verified working 2026-05-03 21:51.
+_ACTOR_TWITTER             = "mikolabs~tweets-x-scraper"
 _ACTOR_TWITTER_FOLLOWERS   = "kaitoeasyapi~premium-x-follower-scraper-following-data"
 _ACTOR_FB_POSTS            = "apify~facebook-posts-scraper"
 _ACTOR_FB_FOLLOWERS        = "apify~facebook-followers-following-scraper"
@@ -249,18 +249,42 @@ def fetch_tiktok(handle_or_url: str) -> Dict[str, Any]:
 
 def fetch_twitter(handle_or_url: str) -> Dict[str, Any]:
     """
-    Scrape an X (Twitter) profile + recent tweets via apidojo/twitter-scraper-lite.
+    Scrape an X (Twitter) profile + recent tweets via mikolabs/tweets-x-scraper.
+
+    Verified input schema 2026-05-03 (per Dave's working test). Uses Nitter as
+    the scraping backend with residential proxies for reliability. Setting
+    scrapeProfileInfo=True so the response includes profile metadata
+    (followers, post count, bio) alongside the tweet sample.
     """
     if not (handle_or_url or "").strip():
         raise RuntimeError("apify_social_failed — twitter: empty input")
 
     raw = handle_or_url.strip().lstrip("@").rstrip("/")
     handle = raw.split("/")[-1] if "/" in raw else raw
+    # Strip any whitespace inside the handle just in case
+    handle = handle.strip()
     profile_url = f"https://x.com/{handle}"
 
     payload = {
-        "twitterHandles": [handle],
-        "maxTweets":      _RESULTS_LIMIT,
+        "twitterHandles":        [handle],
+        "scrapeProfileInfo":     True,
+        "includeReplies":        False,
+        "includeRetweets":       True,
+        "includeNativeRetweets": True,
+        "includeLinks":          False,
+        "latestTweets":          False,
+        "mediaOnly":             False,
+        "onlyImages":            False,
+        "onlyQuotes":            False,
+        "onlyVerified":          False,
+        "onlyVideos":            False,
+        "safeSearch":            False,
+        "useResidentialProxy":   True,
+        "nitterInstance":        "https://nitter.net",
+        "proxyConfiguration": {
+            "useApifyProxy":     True,
+            "apifyProxyGroups":  ["RESIDENTIAL"],
+        },
     }
     items = _retry_call(_ACTOR_TWITTER, payload, f"twitter:{handle}")
     return _normalize_twitter(items, handle, profile_url)
@@ -841,7 +865,7 @@ def _normalize_twitter(
         "posts_per_week":       cadence["posts_per_week"],
         "days_since_last_post": cadence["days_since_last_post"],
         "bio":                  bio,
-        "data_source":          "apify_apidojo_twitter_scraper_lite",
+        "data_source":          "apify_mikolabs_tweets_x_scraper",
         "scraped_at":           _now_iso(),
         "raw_count":            len(items),
     }
