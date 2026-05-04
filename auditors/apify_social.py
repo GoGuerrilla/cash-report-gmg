@@ -273,9 +273,12 @@ def fetch_twitter(handle_or_url: str) -> Dict[str, Any]:
     handle = handle.strip()
     profile_url = f"https://x.com/{handle}"
 
+    # resultsLimit caps follower+following records returned. Set high so the
+    # follower count derived from len(items where type='followers') is accurate
+    # for most accounts; truly massive accounts will still be a floor estimate.
     payload = {
         "Input_Search": [handle],
-        "resultsLimit": _RESULTS_LIMIT * 2,   # actor expects "results" — 50 default
+        "resultsLimit": 5000,
     }
     items = _retry_call(_ACTOR_TWITTER, payload, f"twitter:{handle}")
     return _normalize_twitter(items, handle, profile_url)
@@ -433,32 +436,32 @@ def fetch_twitter_followers(handle_or_url: str) -> Dict[str, Any]:
     }
     items = _retry_call(_ACTOR_TWITTER_FOLLOWERS, payload, f"twitter_followers:{handle}")
 
-    # Try to find an explicit count field on any returned record; otherwise
-    # fall back to len(items) as the lower-bound follower count.
-    followers = None
-    for it in items[:5]:
-        if not isinstance(it, dict):
-            continue
-        for key in ("followers_count", "followersCount", "totalFollowers",
-                    "total_followers", "followerCount"):
-            v = it.get(key)
-            if isinstance(v, int) and v > 0:
-                followers = v
-                break
-        if followers:
-            break
+    # Verified 2026-05-04: actor returns mixed list of follower + following
+    # user records (follower_count on each is THAT person's count, not the
+    # subject's). Count records where type='followers' (or equivalent) for
+    # the subject's follower count.
+    follower_records  = [it for it in items if isinstance(it, dict)
+                         and (it.get("type") or "").lower() in ("followers", "follower")]
+    following_records = [it for it in items if isinstance(it, dict)
+                         and (it.get("type") or "").lower() in ("following", "followings")]
+    followers = len(follower_records) if follower_records else None
+    following = len(following_records) if following_records else None
 
+    # Fallback: if the actor doesn't tag records by type, use len(items)
+    # as a floor estimate of total connections.
     if followers is None and items:
-        # Each item is a follower record — count them as a floor estimate
         followers = len(items)
 
-    if followers is None:
-        _log_schema_sample(f"twitter_followers:{handle}", items, ["followers"])
+    log.info(
+        "apify_social twitter_followers handle=%r followers_records=%d "
+        "following_records=%d total_items=%d",
+        handle, len(follower_records), len(following_records), len(items),
+    )
 
     return {
         "handle":      f"@{handle}",
         "followers":   followers,
-        "following":   None,   # not requested
+        "following":   following,
         "data_source": "apify_kaitoeasyapi_premium_x_follower_scraper",
         "scraped_at":  _now_iso(),
         "raw_count":   len(items),
@@ -819,48 +822,24 @@ def _normalize_twitter(
     if not isinstance(items, list):
         items = []
 
-    handle_lc = handle.lower()
-    subject = {}
-    matched_at = -1
-    for i, it in enumerate(items):
-        if not isinstance(it, dict):
-            continue
-        u = (it.get("username") or "").strip().lower()
-        if u == handle_lc:
-            subject = it
-            matched_at = i
-            break
+    # Verified actor behavior 2026-05-04: the response is NOT the subject's
+    # profile — it's the LIST of accounts that follow / are followed by the
+    # search term. Each item has type='followers' or type='following'. The
+    # subject's follower count = count of records where type='followers'.
+    # Capped at the actor's resultsLimit setting (5000 in fetch_twitter).
+    follower_records  = [it for it in items if isinstance(it, dict)
+                         and (it.get("type") or "").lower() == "followers"]
+    following_records = [it for it in items if isinstance(it, dict)
+                         and (it.get("type") or "").lower() == "following"]
+    followers = len(follower_records) if follower_records else None
+    post_count = None  # this actor doesn't return subject's tweet count
+    bio = ""           # this actor doesn't return subject's bio
 
-    # Diagnostic: dump top-3 items' username + key fields so we can verify the
-    # subject actually appears in the response (or whether the actor returns
-    # only follower/following records — meaning we need a different approach
-    # for the subject's own follower count).
-    sample = []
-    for it in items[:3]:
-        if isinstance(it, dict):
-            sample.append({
-                "username":       it.get("username"),
-                "name":           it.get("name"),
-                "follower_count": it.get("follower_count"),
-                "type":           it.get("type"),
-                "search":         it.get("search"),
-            })
     log.info(
-        "apify_social twitter-debug handle=%r matched_at=%d sample[:3]=%s "
-        "total_items=%d",
-        handle, matched_at, sample, len(items),
+        "apify_social twitter handle=%r followers_records=%d "
+        "following_records=%d total_items=%d",
+        handle, len(follower_records), len(following_records), len(items),
     )
-
-    if not subject and items:
-        subject = items[0] if isinstance(items[0], dict) else {}
-
-    followers  = (subject.get("follower_count")
-                  or subject.get("followers_count")
-                  or subject.get("followersCount") or None)
-    post_count = (subject.get("number_of_tweets")
-                  or subject.get("tweet_count")
-                  or subject.get("statusesCount") or None)
-    bio        = (subject.get("description") or "").strip()
 
     # This actor doesn't return tweet timeline — it returns user profile + a
     # list of followers/followings. Cadence + recent_posts left empty. The
