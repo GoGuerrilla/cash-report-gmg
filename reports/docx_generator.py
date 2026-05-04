@@ -600,6 +600,23 @@ class DocxReportGenerator:
                 for p, d in channels.items()
             ], col_widths=[Inches(1.3), Inches(1.4), Inches(1.4), Inches(1.9)])
 
+        # Social Media Content & Audience composite — surfaces the social_audience
+        # score that contributes 15% of the Audience pillar.
+        social_audience = self.cash.get("social_audience")
+        if social_audience is not None:
+            self._subsection(
+                doc,
+                f"Social Media Content & Audience — Score: {social_audience}/100  ({_grade(social_audience)})",
+            )
+            p = doc.add_paragraph()
+            p.paragraph_format.space_after = Pt(6)
+            run = p.add_run(
+                "Composite signal across active social channels — follower count, "
+                "posting cadence, and confirmed activity. Counts for 15% of the "
+                "Audience pillar score."
+            )
+            run.font.size = Pt(10)
+
         # YouTube channel metrics (live via YouTube Data API v3)
         content = self.data.get("content", {})
         yt = content.get("youtube_metrics")
