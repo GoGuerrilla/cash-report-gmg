@@ -160,12 +160,42 @@ def _log_schema_sample(label: str, items: List[Dict], missing_fields: List[str])
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _parse_iso(value: Any) -> Optional[datetime]:
-    """Best-effort ISO8601 parse. Returns None on failure."""
+    """Best-effort date parse — handles ISO8601 strings AND Unix epoch ints."""
     if not value:
         return None
+    # Unix epoch (seconds or milliseconds)
+    if isinstance(value, (int, float)):
+        try:
+            ts = float(value)
+            if ts > 1e12:        # likely milliseconds
+                ts /= 1000.0
+            return datetime.fromtimestamp(ts, tz=timezone.utc)
+        except Exception:
+            return None
+    s = str(value).strip()
+    if not s:
+        return None
+    # Numeric string → treat as epoch
+    if s.replace(".", "", 1).isdigit():
+        try:
+            ts = float(s)
+            if ts > 1e12:
+                ts /= 1000.0
+            return datetime.fromtimestamp(ts, tz=timezone.utc)
+        except Exception:
+            pass
+    # ISO8601 string
     try:
-        s = str(value).replace("Z", "+00:00")
-        d = datetime.fromisoformat(s)
+        d = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+        return d
+    except Exception:
+        pass
+    # RFC 2822 / Twitter classic format ("Wed Oct 10 20:19:24 +0000 2018")
+    try:
+        from email.utils import parsedate_to_datetime
+        d = parsedate_to_datetime(s)
         if d.tzinfo is None:
             d = d.replace(tzinfo=timezone.utc)
         return d
@@ -430,21 +460,24 @@ def fetch_twitter_tweets(handle_or_url: str) -> Dict[str, Any]:
     for it in items[:_RESULTS_LIMIT * 2]:
         if not isinstance(it, dict):
             continue
-        # Sister-actor convention uses snake_case; try common date field names
-        published = (it.get("created_at") or it.get("createdAt")
-                     or it.get("date") or it.get("timestamp")
-                     or it.get("published"))
+        # scraping_solutions tweet actor schema (verified 2026-05-04):
+        # creation_date (preferred), timestamp (epoch fallback)
+        published = (it.get("creation_date") or it.get("timestamp")
+                     or it.get("created_at") or it.get("createdAt")
+                     or it.get("date") or it.get("published"))
         d = _parse_iso(published)
         if d:
             pub_dates.append(d)
         recent_posts.append({
-            "url":        it.get("url") or it.get("tweet_url") or it.get("twitter_url"),
-            "text":       it.get("text") or it.get("full_text") or "",
+            "url":        it.get("link_post") or it.get("url")
+                           or it.get("tweet_url"),
+            "text":       it.get("text") or "",
             "published":  published,
-            "likes":      it.get("likes") or it.get("favorite_count") or it.get("like_count"),
-            "retweets":   it.get("retweets") or it.get("retweet_count"),
-            "replies":    it.get("replies") or it.get("reply_count"),
-            "views":      it.get("views") or it.get("view_count"),
+            "likes":      it.get("favorite_count") or it.get("likes")
+                           or it.get("like_count"),
+            "retweets":   it.get("retweet_count"),
+            "replies":    it.get("reply_count"),
+            "quotes":     it.get("quote_count"),
         })
         if len(recent_posts) >= _RESULTS_LIMIT:
             break
