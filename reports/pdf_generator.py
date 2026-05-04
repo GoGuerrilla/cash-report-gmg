@@ -537,28 +537,6 @@ class PDFReportGenerator:
                       f'</div>')
         return f'<div class="score-grid">{cards}</div>'
 
-    def _social_audience_block(self) -> str:
-        """
-        Render the Social Media Content & Audience score line (Push to A pillar
-        2026-05-03). Pulls the social_audience score computed by ai_analyzer
-        and shows it alongside a one-line description so clients see how their
-        social presence factored into the Audience grade.
-        """
-        score = self.cash.get("social_audience")
-        if score is None:
-            return ""
-        grade = _grade(score)
-        gcls  = _gc(grade)
-        return (
-            f'{_sub("Social Media Content & Audience — Score: " + str(score) + "/100")}'
-            f'<div class="text-body" style="font-size:12px;color:rgba(255,255,255,.7)">'
-            f'Composite signal across active social channels — follower count, '
-            f'posting cadence, and confirmed activity. Counts for 15% of the '
-            f'Audience pillar score.'
-            f'</div>'
-            f'<div style="margin-bottom:14px"><span class="sc-grade {gcls}">{grade}</span></div>'
-        )
-
     def _overall_banner(self) -> str:
         score = self.cash["overall"]
         g     = self.ai.get("overall_grade", _grade(score))
@@ -863,7 +841,6 @@ class PDFReportGenerator:
             f'{_split_table(brand.get("issues", []), brand.get("strengths", []))}'
             f'{_sub("Content Freshness — Score: " + str(fresh.get("score", 50)) + "/100")}'
             f'{freshness_table}'
-            f'{self._social_audience_block()}'
         )
         if content_strategy:
             body += (
