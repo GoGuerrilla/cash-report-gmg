@@ -423,12 +423,13 @@ def fetch_twitter_followers(handle_or_url: str) -> Dict[str, Any]:
     # Actor uses lowercase usernames per spec
     user_name = handle.lower()
 
+    # Match Dave's verified payload exactly — the actor rejects 0/false combos.
     payload = {
         "user_names":     [user_name],
         "getFollowers":   True,
-        "getFollowing":   False,   # save cost — we only need the follower count
+        "getFollowing":   True,
         "maxFollowers":   200,
-        "maxFollowings":  0,
+        "maxFollowings":  200,
     }
     items = _retry_call(_ACTOR_TWITTER_FOLLOWERS, payload, f"twitter_followers:{handle}")
 
@@ -805,46 +806,49 @@ def _normalize_twitter(
     items: List[Dict], handle: str, profile_url: str,
 ) -> Dict[str, Any]:
     """
-    apidojo/twitter-scraper-lite returns a list of tweet dicts, with author info
-    on each tweet under .author or .user.
+    Verified actor schema (scraping_solutions/twitter-x-scraper-followers-followings)
+    from live audit 2026-05-04: returns up to 50 user-record dicts with flat
+    snake_case fields. Each item has:
+      bot, description, favourites_count, follower_count, following_count,
+      is_private, is_verified, location, name, number_of_tweets,
+      profile_pic_url, search, type, user_id, username
+    Items typically include the subject user PLUS their followers/followings.
+    Find the subject by matching username (case-insensitive) to the input handle;
+    fall back to first item if no match.
     """
     if not isinstance(items, list):
         items = []
 
-    first = items[0] if items else {}
-    author = first.get("author") or first.get("user") or {}
-    followers  = author.get("followers") or author.get("followersCount") or None
-    post_count = author.get("statusesCount") or author.get("tweetCount") or None
-    bio        = (author.get("description") or author.get("bio") or "").strip()
+    handle_lc = handle.lower()
+    subject = {}
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        u = (it.get("username") or "").strip().lower()
+        if u == handle_lc:
+            subject = it
+            break
+    if not subject and items:
+        subject = items[0] if isinstance(items[0], dict) else {}
 
+    followers  = (subject.get("follower_count")
+                  or subject.get("followers_count")
+                  or subject.get("followersCount") or None)
+    post_count = (subject.get("number_of_tweets")
+                  or subject.get("tweet_count")
+                  or subject.get("statusesCount") or None)
+    bio        = (subject.get("description") or "").strip()
+
+    # This actor doesn't return tweet timeline — it returns user profile + a
+    # list of followers/followings. Cadence + recent_posts left empty. The
+    # X followers actor (kaitoeasyapi) supplies the count via a separate call.
     recent_posts: List[Dict] = []
     pub_dates: List[datetime] = []
-    for it in items[:_RESULTS_LIMIT]:
-        published = it.get("createdAt") or it.get("created_at") or it.get("timestamp")
-        d = _parse_iso(published)
-        if d:
-            pub_dates.append(d)
-        recent_posts.append({
-            "url":        it.get("url") or it.get("twitterUrl"),
-            "text":       it.get("text") or it.get("fullText") or "",
-            "published":  published,
-            "likes":      it.get("likeCount") or it.get("favoriteCount"),
-            "retweets":   it.get("retweetCount"),
-            "replies":    it.get("replyCount"),
-            "views":      it.get("viewCount"),
-        })
-
     cadence = _cadence_from_dates(pub_dates)
 
-    # Diagnostic: surface actor's actual schema when expected fields came back None
-    _missing = [name for name, val in (
-        ("followers", followers),
-        ("post_count", post_count),
-        ("posts_per_week", cadence["posts_per_week"]),
-        ("days_since_last_post", cadence["days_since_last_post"]),
-    ) if val is None]
-    if _missing:
-        _log_schema_sample(f"twitter:{handle}", items, _missing)
+    # Diagnostic only fires if subject lookup failed entirely
+    if followers is None and post_count is None:
+        _log_schema_sample(f"twitter:{handle}", items, ["followers", "post_count"])
 
     return {
         "platform":             "X",
