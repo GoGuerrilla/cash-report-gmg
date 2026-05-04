@@ -5,13 +5,16 @@ Measures how likely a brand is to appear in AI-generated answers:
 
 Scoring components (weights)
 ─────────────────────────────
-  SERP Visibility      20%  — GSC keyword rankings, clicks, avg position
-  On-page SEO          15%  — title, meta desc, H1/H2 keyword optimisation
-  Schema Markup        15%  — structured data + FAQPage schema
-  FAQ / Q&A Content    15%  — Q&A content AI systems prefer to cite
-  E-E-A-T Signals      15%  — author credentials, trust proof, expertise
-  Brand Authority      15%  — social breadth, LinkedIn, GBP
-  AI Citation Score     5%  — composite citation-likelihood estimate
+  SERP Visibility      24%  — GSC keyword rankings, clicks, avg position
+  On-page SEO          18%  — title, meta desc, H1/H2 keyword optimisation
+  Schema Markup        18%  — structured data (FAQPage schema scored under AEO)
+  E-E-A-T Signals      18%  — author credentials, trust proof, expertise
+  Brand Authority      22%  — social breadth, LinkedIn, GBP
+
+FAQ / Q&A Content (was 15%) and AI Citation Score (was 5%) moved to the AEO
+pillar 2026-05-04 — see project_phase2_aeo_pillar.md. Combined 20% redistributed
+across the five remaining components per spec (SERP +4, On-page +3, Schema +3,
+E-E-A-T +3, Brand +7).
 
 Data sources
 ─────────────
@@ -157,29 +160,27 @@ class GEOAuditor:
         serp      = self._score_serp_visibility()
         onpage    = self._score_onpage_seo()
         schema    = self._score_schema()
-        faq       = self._score_faq()
         eeat      = self._score_eeat()
         authority = self._score_authority()
-        citation  = self._score_citation(schema, faq, eeat, authority)
 
+        # FAQ / Q&A Content (was 15%) and AI Citation Score (was 5%) moved to
+        # the AEO pillar 2026-05-04 — see project_phase2_aeo_pillar.md. Their
+        # combined 20% redistributes across the five remaining components per
+        # the spec: SERP +4, On-page +3, Schema +3, E-E-A-T +3, Brand +7.
         components = {
             "SERP Visibility":    serp,
             "On-page SEO":        onpage,
             "Schema Markup":      schema,
-            "FAQ / Q&A Content":  faq,
             "E-E-A-T Signals":    eeat,
             "Brand Authority":    authority,
-            "AI Citation Score":  citation,
         }
 
         weights = {
-            "SERP Visibility":   0.20,
-            "On-page SEO":       0.15,
-            "Schema Markup":     0.15,
-            "FAQ / Q&A Content": 0.15,
-            "E-E-A-T Signals":   0.15,
-            "Brand Authority":   0.15,
-            "AI Citation Score": 0.05,
+            "SERP Visibility":   0.24,
+            "On-page SEO":       0.18,
+            "Schema Markup":     0.18,
+            "E-E-A-T Signals":   0.18,
+            "Brand Authority":   0.22,
         }
 
         overall = round(sum(components[k]["score"] * weights[k] for k in components))
@@ -870,8 +871,11 @@ class GEOAuditor:
     def _platform_notes(self, components: Dict) -> Dict[str, str]:
         schema_ok  = components["Schema Markup"]["status"] == "pass"
         eeat_ok    = components["E-E-A-T Signals"]["status"] == "pass"
-        faq_ok     = components["FAQ / Q&A Content"]["status"] == "pass"
-        citation_s = components["AI Citation Score"]["score"]
+        # FAQ / Citation moved to AEO 2026-05-04 — keep safe defaults so the
+        # platform-notes copy still composes when those components no longer
+        # exist in the GEO result. Treat as neutral signals here.
+        faq_ok     = False
+        citation_s = 50
         serp_ok    = components["SERP Visibility"]["status"] == "pass"
         onpage_ok  = components["On-page SEO"]["status"] == "pass"
 
@@ -920,7 +924,10 @@ class GEOAuditor:
         serp_score   = components["SERP Visibility"]["score"]
         onpage_score = components["On-page SEO"]["score"]
         schema_score = components["Schema Markup"]["score"]
-        faq_score    = components["FAQ / Q&A Content"]["score"]
+        # FAQ moved to AEO 2026-05-04. AEO emits its own FAQ-related issues.
+        # Default high so the GEO 'Create FAQ page' rec block below stays
+        # quiet when invoked from GEO — AEO surfaces the dedicated FAQ guidance.
+        faq_score    = components.get("FAQ / Q&A Content", {}).get("score", 100)
         eeat_score   = components["E-E-A-T Signals"]["score"]
         auth_score   = components["Brand Authority"]["score"]
 
