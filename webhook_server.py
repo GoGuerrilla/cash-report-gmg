@@ -1135,6 +1135,27 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
             log.warning("Apify X followers fetch failed for %r: %s",
                         config.twitter_handle, exc)
 
+        # X tweet timeline enricher — fills in posts_per_week + days_since_last_post
+        # since the followers/followings actor doesn't return tweet timeline.
+        try:
+            log.info("Apify X tweets fetch: handle=%r", config.twitter_handle)
+            _t = time.time()
+            tw_tweets = apify_social.fetch_twitter_tweets(config.twitter_handle)
+            log.info("TIMING  apify_twitter_tweets   %.2fs", time.time() - _t)
+            if tw_tweets.get("recent_posts"):
+                channel_data["twitter"]["recent_posts"] = tw_tweets["recent_posts"]
+            if tw_tweets.get("posts_per_week") is not None:
+                channel_data["twitter"]["posts_per_week"] = tw_tweets["posts_per_week"]
+            if tw_tweets.get("days_since_last_post") is not None:
+                channel_data["twitter"]["days_since_last_post"] = tw_tweets["days_since_last_post"]
+            log.info("X tweets (Apify): recent=%d ppw=%s days_since=%s",
+                     len(tw_tweets.get("recent_posts", [])),
+                     tw_tweets.get("posts_per_week"),
+                     tw_tweets.get("days_since_last_post"))
+        except Exception as exc:
+            log.warning("Apify X tweets fetch failed for %r: %s",
+                        config.twitter_handle, exc)
+
     # Facebook — fallback when Meta Graph API didn't populate
     if config.facebook_page_url and channel_data["facebook"].get("is_active") is not True:
         try:

@@ -61,6 +61,7 @@ _ACTOR_TIKTOK              = "clockworks~tiktok-scraper"
 # followers/followings lists rather than profile + tweets — first audit's
 # schema-sample diagnostic will tell us what fields we actually get.
 _ACTOR_TWITTER             = "scraping_solutions~twitter-x-scraper-followers-followings"
+_ACTOR_TWITTER_TWEETS      = "scraping_solutions~twitter-x-scraper-post-timeline-search-replies"
 _ACTOR_TWITTER_FOLLOWERS   = "kaitoeasyapi~premium-x-follower-scraper-following-data"
 _ACTOR_FB_POSTS            = "apify~facebook-posts-scraper"
 _ACTOR_FB_FOLLOWERS        = "apify~facebook-followers-following-scraper"
@@ -394,6 +395,78 @@ def fetch_instagram_posts(handle_or_url: str) -> Dict[str, Any]:
         "posts_per_week":       cadence["posts_per_week"],
         "days_since_last_post": cadence["days_since_last_post"],
         "data_source":          "apify_instagram_post_scraper",
+        "scraped_at":           _now_iso(),
+        "raw_count":            len(items),
+    }
+
+
+def fetch_twitter_tweets(handle_or_url: str) -> Dict[str, Any]:
+    """
+    Fetch X tweet timeline via scraping_solutions/twitter-x-scraper-post-timeline-search-replies.
+    Same input shape as the followers/followings actor. Returns a list of tweet
+    records — used to compute posts_per_week + days_since_last_post.
+
+    Returns: {handle, recent_posts, posts_per_week, days_since_last_post,
+              data_source, scraped_at, raw_count}
+    """
+    if not (handle_or_url or "").strip():
+        raise RuntimeError("apify_social_failed — twitter_tweets: empty input")
+
+    raw = handle_or_url.strip().lstrip("@").rstrip("/")
+    handle = raw.split("/")[-1] if "/" in raw else raw
+    handle = handle.strip()
+
+    payload = {
+        "Input_Search": [handle],
+        "resultsLimit": _RESULTS_LIMIT,   # 25 tweets — enough for cadence
+    }
+    items = _retry_call(_ACTOR_TWITTER_TWEETS, payload, f"twitter_tweets:{handle}")
+
+    recent_posts: List[Dict] = []
+    pub_dates: List[datetime] = []
+    handle_lc = handle.lower()
+    # Filter to tweets authored by the subject if author info is present;
+    # otherwise accept all returned items (may be timeline including replies).
+    for it in items[:_RESULTS_LIMIT * 2]:
+        if not isinstance(it, dict):
+            continue
+        # Sister-actor convention uses snake_case; try common date field names
+        published = (it.get("created_at") or it.get("createdAt")
+                     or it.get("date") or it.get("timestamp")
+                     or it.get("published"))
+        d = _parse_iso(published)
+        if d:
+            pub_dates.append(d)
+        recent_posts.append({
+            "url":        it.get("url") or it.get("tweet_url") or it.get("twitter_url"),
+            "text":       it.get("text") or it.get("full_text") or "",
+            "published":  published,
+            "likes":      it.get("likes") or it.get("favorite_count") or it.get("like_count"),
+            "retweets":   it.get("retweets") or it.get("retweet_count"),
+            "replies":    it.get("replies") or it.get("reply_count"),
+            "views":      it.get("views") or it.get("view_count"),
+        })
+        if len(recent_posts) >= _RESULTS_LIMIT:
+            break
+
+    cadence = _cadence_from_dates(pub_dates)
+
+    if cadence["posts_per_week"] is None and not recent_posts:
+        _log_schema_sample(f"twitter_tweets:{handle}", items,
+                           ["recent_posts", "posts_per_week"])
+
+    log.info(
+        "apify_social twitter_tweets handle=%r recent=%d ppw=%s days_since=%s",
+        handle, len(recent_posts),
+        cadence["posts_per_week"], cadence["days_since_last_post"],
+    )
+
+    return {
+        "handle":               f"@{handle}",
+        "recent_posts":         recent_posts,
+        "posts_per_week":       cadence["posts_per_week"],
+        "days_since_last_post": cadence["days_since_last_post"],
+        "data_source":          "apify_scraping_solutions_twitter_tweets",
         "scraped_at":           _now_iso(),
         "raw_count":            len(items),
     }
