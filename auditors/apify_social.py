@@ -821,13 +821,36 @@ def _normalize_twitter(
 
     handle_lc = handle.lower()
     subject = {}
-    for it in items:
+    matched_at = -1
+    for i, it in enumerate(items):
         if not isinstance(it, dict):
             continue
         u = (it.get("username") or "").strip().lower()
         if u == handle_lc:
             subject = it
+            matched_at = i
             break
+
+    # Diagnostic: dump top-3 items' username + key fields so we can verify the
+    # subject actually appears in the response (or whether the actor returns
+    # only follower/following records — meaning we need a different approach
+    # for the subject's own follower count).
+    sample = []
+    for it in items[:3]:
+        if isinstance(it, dict):
+            sample.append({
+                "username":       it.get("username"),
+                "name":           it.get("name"),
+                "follower_count": it.get("follower_count"),
+                "type":           it.get("type"),
+                "search":         it.get("search"),
+            })
+    log.info(
+        "apify_social twitter-debug handle=%r matched_at=%d sample[:3]=%s "
+        "total_items=%d",
+        handle, matched_at, sample, len(items),
+    )
+
     if not subject and items:
         subject = items[0] if isinstance(items[0], dict) else {}
 

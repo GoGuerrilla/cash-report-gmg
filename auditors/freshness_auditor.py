@@ -31,6 +31,7 @@ PLATFORM_BENCHMARKS = POSTING_BENCHMARKS.get("Other", {
     "YouTube":   {"min": 1, "ideal": 2,  "max": 5},
     "Facebook":  {"min": 3, "ideal": 5,  "max": 14},
     "TikTok":    {"min": 5, "ideal": 14, "max": 28},
+    "X":         {"min": 3, "ideal": 7,  "max": 21},
     "Discord":   {"min": 3, "ideal": 7,  "max": 14},
 })
 
@@ -49,7 +50,15 @@ _PRELOAD_KEYS = {
     "YouTube":   "youtube",
     "Facebook":  "facebook",
     "TikTok":    "tiktok",
+    "X":         "twitter",
     "Discord":   "discord",
+}
+
+# Linktree scraper uses the legacy 'Twitter' canonical name; the rest of the
+# codebase (channel_data, intake fields, reports) uses 'X'. Normalize at the
+# freshness loop entry so platforms_found doesn't render as 'Twitter'.
+_PLATFORM_ALIASES = {
+    "Twitter": "X",
 }
 
 
@@ -70,6 +79,7 @@ class FreshnessAuditor:
         for platform in platforms:
             if platform in ("Email", "Website"):
                 continue
+            platform = _PLATFORM_ALIASES.get(platform, platform)
             channel_data = self._audit_channel(platform)
             channel_results[platform] = channel_data
             if channel_data.get("data_source") == "api_blocked":
