@@ -52,6 +52,8 @@ log = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 _ACTOR_INSTAGRAM           = "apify~instagram-scraper"
+_ACTOR_IG_FOLLOWERS        = "apify~instagram-followers-count-scraper"
+_ACTOR_IG_POSTS            = "apify~instagram-post-scraper"
 _ACTOR_TIKTOK              = "clockworks~tiktok-scraper"
 # Replaced apidojo/twitter-scraper-lite (returned only {'demo': ...} placeholder
 # data) with apidojo/twitter-user-scraper — the full user-scraper variant returns
@@ -281,6 +283,102 @@ def fetch_facebook_posts(page_url: str) -> Dict[str, Any]:
     }
     items = _retry_call(_ACTOR_FB_POSTS, payload, f"facebook:{page_slug}")
     return _normalize_facebook(items, page_slug, page_url)
+
+
+def fetch_instagram_followers(handle_or_url: str) -> Dict[str, Any]:
+    """
+    Dedicated IG follower-count fetcher via apify/instagram-followers-count-scraper.
+
+    Use as a backfill when the main fetch_instagram() returned no follower count
+    (the bundled scraper occasionally drops ownerFollowersCount on profiles
+    where the post sample is small or the profile is private).
+
+    Returns: {handle, followers, raw_count, data_source, scraped_at}
+    """
+    if not (handle_or_url or "").strip():
+        raise RuntimeError("apify_social_failed — instagram_followers: empty input")
+
+    raw = handle_or_url.strip().lstrip("@").rstrip("/")
+    handle = raw.split("/")[-1] if "/" in raw else raw
+
+    payload = {
+        "usernames":      [handle],
+        "instagramHandles": [handle],
+    }
+    items = _retry_call(_ACTOR_IG_FOLLOWERS, payload, f"instagram_followers:{handle}")
+
+    first = items[0] if items else {}
+    followers = (first.get("followers")
+                 or first.get("followersCount")
+                 or first.get("followerCount")
+                 or first.get("followers_count")
+                 or first.get("count") or None)
+
+    if followers is None:
+        _log_schema_sample(f"instagram_followers:{handle}", items, ["followers"])
+
+    return {
+        "handle":      f"@{handle}",
+        "followers":   followers,
+        "data_source": "apify_instagram_followers_count_scraper",
+        "scraped_at":  _now_iso(),
+        "raw_count":   len(items),
+    }
+
+
+def fetch_instagram_posts(handle_or_url: str) -> Dict[str, Any]:
+    """
+    IG post-detail fetcher via apify/instagram-post-scraper.
+
+    Returns the standard recent_posts shape so the main fetch_instagram() can
+    be supplemented when the bundled scraper returns thin post data.
+    """
+    if not (handle_or_url or "").strip():
+        raise RuntimeError("apify_social_failed — instagram_posts: empty input")
+
+    raw = handle_or_url.strip().lstrip("@").rstrip("/")
+    handle = raw.split("/")[-1] if "/" in raw else raw
+    profile_url = f"https://www.instagram.com/{handle}/"
+
+    payload = {
+        "directUrls":   [profile_url],
+        "username":     [handle],
+        "resultsLimit": _RESULTS_LIMIT,
+    }
+    items = _retry_call(_ACTOR_IG_POSTS, payload, f"instagram_posts:{handle}")
+
+    recent_posts: List[Dict] = []
+    pub_dates: List[datetime] = []
+    for it in items[:_RESULTS_LIMIT]:
+        if not isinstance(it, dict):
+            continue
+        published = it.get("timestamp") or it.get("takenAtTimestamp") or it.get("date")
+        d = _parse_iso(published)
+        if d:
+            pub_dates.append(d)
+        recent_posts.append({
+            "url":        it.get("url") or it.get("postUrl"),
+            "text":       it.get("caption") or "",
+            "published":  published,
+            "likes":      it.get("likesCount"),
+            "comments":   it.get("commentsCount"),
+            "type":       it.get("type"),
+        })
+
+    cadence = _cadence_from_dates(pub_dates)
+
+    if not recent_posts:
+        _log_schema_sample(f"instagram_posts:{handle}", items, ["recent_posts"])
+
+    return {
+        "handle":               f"@{handle}",
+        "recent_posts":         recent_posts,
+        "posts_per_week":       cadence["posts_per_week"],
+        "days_since_last_post": cadence["days_since_last_post"],
+        "data_source":          "apify_instagram_post_scraper",
+        "scraped_at":           _now_iso(),
+        "raw_count":            len(items),
+    }
 
 
 def fetch_twitter_followers(handle_or_url: str) -> Dict[str, Any]:

@@ -1056,6 +1056,43 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
                         config.instagram_handle, exc)
             channel_data["instagram"]["data_source"] = "apify_scrape_failed"
 
+        # Dedicated IG follower-count enricher — backfills when main scraper
+        # didn't return ownerFollowersCount.
+        if channel_data["instagram"].get("followers") is None:
+            try:
+                log.info("Apify IG followers fetch: handle=%r", config.instagram_handle)
+                _t = time.time()
+                ig_followers = apify_social.fetch_instagram_followers(config.instagram_handle)
+                log.info("TIMING  apify_instagram_followers %.2fs", time.time() - _t)
+                if ig_followers.get("followers") is not None:
+                    channel_data["instagram"]["followers"] = ig_followers["followers"]
+                    log.info("Instagram followers (Apify): %s",
+                             ig_followers["followers"])
+            except Exception as exc:
+                log.warning("Apify IG followers fetch failed for %r: %s",
+                            config.instagram_handle, exc)
+
+        # IG post-detail enricher — backfills when main scraper returned thin
+        # or empty post sample (rare but happens on private/new accounts).
+        if not channel_data["instagram"].get("recent_posts"):
+            try:
+                log.info("Apify IG posts fetch: handle=%r", config.instagram_handle)
+                _t = time.time()
+                ig_posts = apify_social.fetch_instagram_posts(config.instagram_handle)
+                log.info("TIMING  apify_instagram_posts   %.2fs", time.time() - _t)
+                if ig_posts.get("recent_posts"):
+                    channel_data["instagram"]["recent_posts"] = ig_posts["recent_posts"]
+                if ig_posts.get("posts_per_week") is not None:
+                    channel_data["instagram"]["posts_per_week"] = ig_posts["posts_per_week"]
+                if ig_posts.get("days_since_last_post") is not None:
+                    channel_data["instagram"]["days_since_last_post"] = ig_posts["days_since_last_post"]
+                log.info("Instagram posts (Apify): recent=%d ppw=%s",
+                         len(ig_posts.get("recent_posts", [])),
+                         ig_posts.get("posts_per_week"))
+            except Exception as exc:
+                log.warning("Apify IG posts fetch failed for %r: %s",
+                            config.instagram_handle, exc)
+
     # TikTok — Apify is the only path (no Meta-equivalent for TikTok)
     if config.tiktok_handle:
         try:
