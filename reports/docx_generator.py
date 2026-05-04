@@ -721,6 +721,24 @@ class DocxReportGenerator:
         icp   = self.data.get("icp", {})
         brand = self.data.get("brand", {})
 
+        # Social Media Composite — surfaces social_audience score so the reader
+        # can trace the Audience pillar's three components: ICP 42% + Brand 43%
+        # + Social 15%. Without this, the social weighting is invisible.
+        social_audience = self.cash.get("social_audience")
+        if social_audience is not None:
+            self._subsection(
+                doc,
+                f"Social Media Composite — {social_audience}/100  ({_grade(social_audience)})",
+            )
+            p = doc.add_paragraph()
+            p.paragraph_format.space_after = Pt(6)
+            run = p.add_run(
+                "Aggregated follower count, posting cadence, and active-channel signal "
+                "across LinkedIn, Instagram, Facebook, TikTok, X, and YouTube. "
+                "Counts for 15% of the Audience pillar score (ICP 42% + Brand 43% + Social 15%)."
+            )
+            run.font.size = Pt(10)
+
         # ICP verdict callout
         verdict = icp.get("icp_verdict", "")
         if verdict:

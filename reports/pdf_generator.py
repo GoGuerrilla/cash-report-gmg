@@ -904,6 +904,24 @@ class PDFReportGenerator:
             f'{_section_hdr("A", "Audience", "Are you reaching the right people on the right platforms?", a_score, a_grade)}'
         )
 
+        # Social Media Composite — surfaces the social_audience score so the
+        # reader can trace the Audience pillar's three components: ICP (42%),
+        # Brand (43%), Social (15%). Without this line, the social weighting
+        # is invisible and the A score looks arbitrary.
+        social_audience = self.cash.get("social_audience")
+        if social_audience is not None:
+            sa_grade = _grade(social_audience)
+            sa_gcls  = _gc(sa_grade)
+            body += (
+                f'{_sub("Social Media Composite — " + str(social_audience) + "/100")}'
+                f'<div style="margin-bottom:6px"><span class="sc-grade {sa_gcls}">{sa_grade}</span></div>'
+                f'<div class="text-body" style="font-size:12px;color:rgba(255,255,255,.7);margin-bottom:14px">'
+                f'Aggregated follower count, posting cadence, and active-channel signal '
+                f'across LinkedIn, Instagram, Facebook, TikTok, X, and YouTube. '
+                f'Counts for 15% of the Audience pillar score (ICP 42% + Brand 43% + Social 15%).'
+                f'</div>'
+            )
+
         if plat_table:
             body += f'{_sub("Platform Fit for Target Market")}{plat_table}'
 
