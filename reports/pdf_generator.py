@@ -1741,18 +1741,30 @@ class PDFReportGenerator:
         exec_sum   = ai.get("executive_summary", "")
 
         # Top 3 priorities — bullet list with priority badges (inline styles
-        # so we don't need new CSS classes)
+        # so we don't need new CSS classes). AI returns priority as either an
+        # int (1/2/3 positional) or a string ('CRITICAL'/'HIGH'/'MEDIUM');
+        # _normalize_priority handles both shapes.
         prio_html = ""
         if priorities:
-            _pri_color = {
-                "CRITICAL": "background:rgba(231,76,60,.2);color:#E74C3C;border:1px solid rgba(231,76,60,.4)",
-                "HIGH":     "background:rgba(0,174,239,.15);color:#00AEEF;border:1px solid rgba(0,174,239,.35)",
-                "MEDIUM":   "background:rgba(241,196,15,.15);color:#F1C40F;border:1px solid rgba(241,196,15,.35)",
+            _pri_styles = {
+                "QUICK WIN": "background:rgba(231,76,60,.2);color:#E74C3C;border:1px solid rgba(231,76,60,.4)",
+                "CRITICAL":  "background:rgba(231,76,60,.2);color:#E74C3C;border:1px solid rgba(231,76,60,.4)",
+                "MEDIUM":    "background:rgba(0,174,239,.15);color:#00AEEF;border:1px solid rgba(0,174,239,.35)",
+                "HIGH":      "background:rgba(0,174,239,.15);color:#00AEEF;border:1px solid rgba(0,174,239,.35)",
+                "LONG-TERM": "background:rgba(241,196,15,.15);color:#F1C40F;border:1px solid rgba(241,196,15,.35)",
+                "LOW":       "background:rgba(241,196,15,.15);color:#F1C40F;border:1px solid rgba(241,196,15,.35)",
             }
+            _int_label = {1: "QUICK WIN", 2: "MEDIUM", 3: "LONG-TERM"}
+
+            def _normalize_priority(val):
+                if isinstance(val, int):
+                    return _int_label.get(val, "MEDIUM")
+                return (str(val) or "MEDIUM").upper().strip()
+
             prio_rows = ""
             for p in priorities:
-                pri = p.get("priority", "MEDIUM").upper()
-                pri_style = _pri_color.get(pri, _pri_color["MEDIUM"])
+                pri = _normalize_priority(p.get("priority", "MEDIUM"))
+                pri_style = _pri_styles.get(pri, _pri_styles["MEDIUM"])
                 badge = (f'<span style="{pri_style};padding:3px 10px;'
                          f'border-radius:2px;font-size:9px;font-weight:700;'
                          f'letter-spacing:1.5px">{_h(pri)}</span>')
