@@ -1491,21 +1491,39 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
         log.warning("DOCX generation failed (%.2fs): %s", time.time() - _t, e)
         docx_path = None
 
+    # ── Upload BOTH PDFs to Google Drive (Add-On 2 follow-up) ──────
+    # Non-fatal — silent skip when GOOGLE_DRIVE_* env vars aren't set.
+    if pdf_path or tease_path:
+        try:
+            from reports import drive_uploader
+            for _p, _label in ((pdf_path, "full"), (tease_path, "tease")):
+                if _p and os.path.isfile(_p):
+                    drive_uploader.upload_file(_p)
+        except Exception as drive_err:
+            log.warning("Drive upload step failed (non-fatal): %s", drive_err)
+
     # ── Resolve which file gets emailed ───────────────────────────
     # Add-On 2: send the Smart Tease (4-page condensed) by default per Dave's
-    # GTM directive. Full report stays on disk for internal use. Set env var
-    # SEND_FULL_REPORT=1 to revert to sending the full PDF.
+    # GTM directive. Full report stays on disk for internal use.
+    # Routing rules:
+    #   - beta_docx_only=true            → DOCX attachment
+    #   - admin-portal-triggered audit   → full PDF (strategist QA review)
+    #   - intake-form-triggered audit    → Smart Tease (client-facing)
+    #   - SEND_FULL_REPORT=1 env var     → forces full PDF (escape hatch)
     send_full = os.environ.get("SEND_FULL_REPORT", "").strip() == "1"
+    is_admin  = (getattr(config, "audit_source", "") == "admin_url_only")
     if beta_docx_only:
         report_attachment = docx_path
         attachment_label  = "DOCX"
-    elif tease_path and not send_full:
+    elif tease_path and not send_full and not is_admin:
         report_attachment = tease_path
         attachment_label  = "PDF (Smart Tease)"
         log.info("Email attachment: Smart Tease (full report kept on disk at %s)", pdf_path)
     else:
         report_attachment = pdf_path
-        attachment_label  = "PDF"
+        attachment_label  = "PDF (full report)" if is_admin else "PDF"
+        if is_admin:
+            log.info("Email attachment: full PDF (admin-portal trigger — strategist QA path)")
 
     # ── Email report ──────────────────────────────────────────────
     email_trigger_ts = datetime.utcnow().isoformat()
