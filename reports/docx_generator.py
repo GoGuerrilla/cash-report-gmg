@@ -104,6 +104,8 @@ class DocxReportGenerator:
         self._page_break(doc)
         self._build_section_geo(doc)
         self._page_break(doc)
+        self._build_section_aeo(doc)
+        self._page_break(doc)
         self._build_section_competitive(doc)
         self._page_break(doc)
         self._build_action_plan(doc)
@@ -1128,6 +1130,61 @@ class DocxReportGenerator:
                  r.get("impact", ""))
                 for r in recs
             ], col_widths=[Inches(0.7), Inches(1.4), Inches(2.0), Inches(0.8), Inches(1.6)])
+
+    # ── AEO (Answer Engine Optimisation) ──────────────────────
+
+    def _build_section_aeo(self, doc: Document):
+        """Third Visibility Score pillar — mirrors the PDF _page_aeo render."""
+        aeo = self.data.get("aeo", {})
+        score = aeo.get("score", 50)
+        self._cash_section_banner(
+            doc, "AEO", "ANSWER ENGINE OPTIMISATION", score,
+            "How well are you positioned to be CHOSEN as the answer by AI search engines?",
+        )
+
+        # Intro — what AEO measures + Visibility weight
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(8)
+        run = p.add_run(
+            "AEO measures whether ChatGPT, Google AI Overviews, Perplexity, "
+            "and voice search choose your content as the answer. Counts for "
+            "25% of your overall Visibility Score."
+        )
+        run.font.name = "Calibri"
+        run.font.size = Pt(10)
+        run.font.color.rgb = _rgb(DGRAY)
+
+        # Component breakdown — 6 categories with weight + score + grade
+        components = aeo.get("components", {})
+        weights    = aeo.get("weights", {})
+        if components:
+            self._subsection(doc, "AEO Component Breakdown")
+            rows = []
+            for name, comp in components.items():
+                sc = comp.get("score", 50) if isinstance(comp, dict) else 50
+                wt = weights.get(name, 0.0)
+                wt_str = f"{int(wt * 100)}%" if wt else "—"
+                rows.append((name, wt_str, f"{sc}/100", _grade(sc)))
+            self._detail_table(
+                doc, ["CATEGORY", "WEIGHT", "SCORE", "GRADE"], rows,
+                col_widths=[Inches(2.4), Inches(0.8), Inches(0.9), Inches(0.9)],
+            )
+
+        # Critical AEO signal — FAQPage schema status
+        site = (self.config.preloaded_channel_data or {}).get("website", {})
+        has_faqpage = bool(site.get("apify_has_faqpage"))
+        self._subsection(doc, "Critical AEO Signal")
+        faq_rows = [(
+            "FAQPage Schema",
+            "✅ Detected" if has_faqpage else "🔴 Missing — top AEO priority",
+        )]
+        self._detail_table(
+            doc, ["FIELD", "STATUS"], faq_rows,
+            col_widths=[Inches(2.4), Inches(3.6)],
+        )
+
+        # Issues + strengths aggregated across all 6 categories
+        self._issues_strengths(doc, aeo.get("issues", []), aeo.get("strengths", []))
 
     # ── 90-Day Action Plan ─────────────────────────────────────
 
