@@ -31,9 +31,11 @@ _SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 
 def _build_service():
     """Construct an authenticated Drive v3 service client. Returns None on any
-    failure (missing key, missing libs, malformed JSON)."""
+    failure (missing key, missing libs, malformed JSON). Logs each early-return
+    so silent skips show up in Railway."""
     raw = os.environ.get("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON", "").strip()
     if not raw:
+        log.info("drive_uploader: GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON not set — Drive upload skipped")
         return None
     try:
         info = json.loads(raw)
@@ -41,6 +43,10 @@ def _build_service():
         log.warning("drive_uploader: GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON is not "
                     "valid JSON — %s", exc)
         return None
+    log.info(
+        "drive_uploader: service-account JSON parsed (client_email=%s project_id=%s)",
+        info.get("client_email", "?"), info.get("project_id", "?"),
+    )
     try:
         from google.oauth2 import service_account
         from googleapiclient.discovery import build
@@ -78,8 +84,8 @@ def upload_file(file_path: str, folder_id: Optional[str] = None,
 
     folder_id = folder_id or os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip()
     if not folder_id:
-        # Silent skip — Drive integration not configured. Common during local
-        # development; not an error condition.
+        log.info("drive_uploader: GOOGLE_DRIVE_FOLDER_ID not set — Drive upload skipped for %s",
+                 os.path.basename(file_path))
         return None
 
     service = _build_service()
