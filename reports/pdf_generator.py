@@ -1464,6 +1464,16 @@ class PDFReportGenerator:
             aeo_score,
             aeo_grade,
         )
+        # AEO recommendations
+        aeo_recs = aeo.get("recommendations", [])
+        aeo_rec_rows = "".join(
+            _rec_row(r.get("priority", "MEDIUM"),
+                     r.get("action", ""),
+                     r.get("impact", ""),
+                     r.get("timeline", ""))
+            for r in aeo_recs[:6]
+        )
+
         body = (
             f'{section_hdr}'
             f'<div class="text-body" style="font-size:12px;color:rgba(255,255,255,.6);margin-bottom:14px">'
@@ -1476,6 +1486,8 @@ class PDFReportGenerator:
             f'<table class="field-table"><tbody>{_field("FAQPage Schema", faq_field)}</tbody></table>'
             f'{_split_table(aeo.get("issues", []), aeo.get("strengths", []))}'
         )
+        if aeo_rec_rows:
+            body += f'{_sub("AEO Recommendations")}{_rec_table(aeo_rec_rows)}'
         return _pg(10, body, self.date_str, self.logo_src)
 
     # ── PAGE 11: GBP + Competitive ────────────────────────────────────────────

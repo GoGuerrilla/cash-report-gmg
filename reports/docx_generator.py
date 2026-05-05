@@ -482,6 +482,26 @@ class DocxReportGenerator:
 
         doc.add_paragraph()
 
+        # Visibility Score row — SEO + GEO + AEO composite, mirrors PDF cover
+        # _visibility_strip render. 25% AEO weight is now visible in the DOCX.
+        v = self.cash.get("visibility")
+        if v is not None:
+            self._subsection(doc, "Visibility Score  (SEO finds you · GEO summarises you · AEO chooses you)")
+            seo_v = self.cash.get("visibility_seo", 50)
+            geo_v = self.cash.get("visibility_geo", 50)
+            aeo_v = self.cash.get("visibility_aeo", 50)
+            self._detail_table(
+                doc, ["PILLAR", "WEIGHT", "SCORE"],
+                [
+                    ("SEO",        "40%", f"{seo_v}/100  ({_grade(seo_v)})"),
+                    ("GEO",        "35%", f"{geo_v}/100  ({_grade(geo_v)})"),
+                    ("AEO",        "25%", f"{aeo_v}/100  ({_grade(aeo_v)})"),
+                    ("VISIBILITY", "—",   f"{v}/100  ({_grade(v)})"),
+                ],
+                col_widths=[Inches(2.0), Inches(1.0), Inches(2.5)],
+            )
+            doc.add_paragraph()
+
         # Component detail table
         self._subsection(doc, "Component Breakdown")
         web = self.data.get("website", {}).get("scores", {})
@@ -1185,6 +1205,19 @@ class DocxReportGenerator:
 
         # Issues + strengths aggregated across all 6 categories
         self._issues_strengths(doc, aeo.get("issues", []), aeo.get("strengths", []))
+
+        # AEO Recommendations
+        recs = aeo.get("recommendations", [])
+        if recs:
+            self._subsection(doc, "AEO Recommendations")
+            self._detail_table(
+                doc, ["PRIORITY", "ACTION", "IMPACT", "TIMELINE"],
+                [(r.get("priority", "MEDIUM"),
+                  r.get("action", ""),
+                  r.get("impact", ""),
+                  r.get("timeline", "")) for r in recs],
+                col_widths=[Inches(0.8), Inches(2.0), Inches(2.4), Inches(0.8)],
+            )
 
     # ── 90-Day Action Plan ─────────────────────────────────────
 

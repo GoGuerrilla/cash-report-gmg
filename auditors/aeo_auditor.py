@@ -191,17 +191,91 @@ class AEOAuditor:
             all_strengths.extend(comp.get("strengths", []))
 
         return {
-            "score":        score,
-            "grade":        _grade(score),
-            "band":         _band(score),
-            "status":       "ok",
-            "components":   components,
-            "issues":       all_issues,
-            "strengths":    all_strengths,
-            "weights":      CATEGORY_WEIGHTS,
-            "industry":     self.industry,
-            "data_source":  "aeo_auditor_v1",
+            "score":            score,
+            "grade":            _grade(score),
+            "band":             _band(score),
+            "status":           "ok",
+            "components":       components,
+            "issues":           all_issues,
+            "strengths":        all_strengths,
+            "weights":          CATEGORY_WEIGHTS,
+            "industry":         self.industry,
+            "data_source":      "aeo_auditor_v1",
+            "recommendations":  self._build_recommendations(components),
         }
+
+    def _build_recommendations(self, components: Dict[str, Dict[str, Any]]) -> List[Dict[str, str]]:
+        """
+        Generate per-category recommendations driven by component scores.
+        Mirrors GEOAuditor._build_recommendations style — each rec has
+        priority / action / impact / timeline.
+        """
+        recs: List[Dict[str, str]] = []
+
+        def _score(name: str) -> int:
+            return components.get(name, {}).get("score", 50)
+
+        # Question Coverage — FAQPage schema is the single highest-leverage AEO action
+        if _score("Question Coverage") < 70:
+            recs.append({
+                "priority": "CRITICAL",
+                "action":   "Add FAQPage JSON-LD schema to homepage or a dedicated FAQ page",
+                "impact":   "FAQPage schema is the #1 lever for Google AI Overview inclusion",
+                "timeline": "1–2 days",
+            })
+            recs.append({
+                "priority": "HIGH",
+                "action":   "Convert key H2/H3 headings into question-format ('How does ...?', 'What is ...?')",
+                "impact":   "Question-format headings give AI systems an explicit answer-extraction target",
+                "timeline": "1 week",
+            })
+
+        # Direct Answer Quality — short, snippet-extractable answers
+        if _score("Direct Answer Quality") < 65:
+            recs.append({
+                "priority": "HIGH",
+                "action":   "Rewrite key answer paragraphs to 1–3 plain-language sentences immediately after each question",
+                "impact":   "Snippet-extractable Q&A pairs are what AI systems lift as direct answers",
+                "timeline": "2 weeks",
+            })
+
+        # Structured Data — Organization/LocalBusiness/Service baseline + FAQ + HowTo
+        if _score("Structured Data") < 70:
+            recs.append({
+                "priority": "HIGH",
+                "action":   "Implement Organization + LocalBusiness/Service schema baseline + FAQPage",
+                "impact":   "Structured data is how AI systems identify, classify, and cite businesses",
+                "timeline": "1–2 days",
+            })
+
+        # Entity Clarity — eight identity signals on the homepage
+        if _score("Entity Clarity") < 65:
+            recs.append({
+                "priority": "MEDIUM",
+                "action":   "Surface all eight entity signals on the homepage: name, location, industry, audience, services, founder/team, contact, consistent brand language",
+                "impact":   "AI systems need unambiguous identity to cite a business confidently",
+                "timeline": "1 week",
+            })
+
+        # Conversational Search — natural-language tone
+        if _score("Conversational Search") < 60:
+            recs.append({
+                "priority": "MEDIUM",
+                "action":   "Rewrite hero + service-page copy in the language buyers actually use (drop jargon and acronyms)",
+                "impact":   "Conversational tone matches voice search queries and AI Overview extraction",
+                "timeline": "2–3 weeks",
+            })
+
+        # Trust Signals — testimonials, case studies, credentials
+        if _score("Trust Signals") < 65:
+            recs.append({
+                "priority": "MEDIUM",
+                "action":   "Add 3 testimonials + 1 outcome-focused case study to the homepage",
+                "impact":   "AI systems discount unverified expertise claims — proof signals raise citation likelihood",
+                "timeline": "2–3 weeks",
+            })
+
+        return recs
 
     # ─────────────────────────────────────────────────────────────────────────
     # Category scorers — Part 1 stubs. Each returns a {score, issues,

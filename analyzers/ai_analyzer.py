@@ -314,6 +314,7 @@ class AIAnalyzer:
         funnel     = audit_data.get("funnel", {})
         freshness  = audit_data.get("freshness", {})
         geo        = audit_data.get("geo", {})
+        aeo        = audit_data.get("aeo", {})
         competitor = audit_data.get("competitor", {})
 
         # Pull real issues from every auditor — these are the actual findings
@@ -577,6 +578,14 @@ COMPONENT SCORES:
   Website Content:   {web_scores.get('content', 50)}/100
   Website Conversion:{web_scores.get('conversion', 50)}/100
   GEO (AI Visibility):{geo.get('score', 50)}/100
+  AEO (Answer Engine):{aeo.get('score', 50)}/100  — counts for 25% of Visibility Score
+
+AEO COMPONENT BREAKDOWN (six categories scored 0-100):
+{chr(10).join(f"  {name}: {comp.get('score', 50)}/100" for name, comp in (aeo.get('components') or {}).items())}
+
+When the AEO score is below 60, prioritise FAQPage schema, snippetable Q&A
+content, and conversational tone in your recommendations — these are the
+fastest wins for Google AI Overview / ChatGPT / Perplexity citation.
 
 CORE WEB VITALS: {seo.get('core_web_vitals', {})}
 
