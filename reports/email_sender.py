@@ -60,22 +60,31 @@ def _body_no_attachment(client_name: str, overall_score, overall_grade) -> str:
 
 def _body_text(client_name: str, overall_score, overall_grade,
                attachment_label: str = "PDF") -> str:
+    """Email body for client-facing C.A.S.H. Report delivery.
+    Updated 2026-05-05 per Dave's GTM directive — guerrilla voice, brief-not-full
+    framing, single CTA. Score + grade interpolated from audit data."""
     return (
         f"Hi,\n\n"
-        f"Your C.A.S.H. Report for {client_name} is ready.\n\n"
-        f"Overall C.A.S.H. Score: {overall_score}/100 ({overall_grade})\n\n"
-        f"The full report is attached as a {attachment_label}.\n\n"
-        f"C.A.S.H. stands for:\n"
-        f"C — Content\n"
-        f"A — Audience\n"
-        f"S — Sales\n"
-        f"H — Hold (Retention)\n\n"
-        f"Your report is just the starting point. Optimization begins now.\n\n"
-        f"A GMG strategist is already reviewing your results and will be reaching out "
-        f"with key insights and opportunities tailored to your business.\n\n"
-        f"If you'd prefer to get ahead and start the conversation sooner, you can "
-        f"schedule your strategy session here:\n"
-        f"www.gogmg.net/meeting"
+        f"Your C.A.S.H. Report is ready.\n\n"
+        f"Overall Score: {overall_score} out of 100\n"
+        f"Grade: {overall_grade}\n\n"
+        f"Here is what this snapshot shows you\n\n"
+        f"• Where your marketing is losing traction\n"
+        f"• What is working and what is not\n"
+        f"• A few quick wins you can act on right away\n"
+        f"• Simple guerrilla style moves to pick up momentum fast\n\n"
+        f"This is a brief snapshot, not the full report.\n\n"
+        f"The full report connects everything and shows you exactly what to fix "
+        f"and where to focus next.\n\n"
+        f"No pressure here.\n\n"
+        f"We will walk you through it, answer questions, and share the full breakdown. "
+        f"If it makes sense to work together, great. If not, you still leave with clarity.\n\n"
+        f"We would love to help you take this to the next level. We can support "
+        f"everything you see in this report from strategy to execution.\n\n"
+        f"If you want to get ahead, grab a time here\n"
+        f"www.gogmg.net/meeting\n\n"
+        f"Talk soon,\n"
+        f"Guerrilla Marketing Group"
     )
 
 
@@ -266,7 +275,7 @@ def send_report(
         return False
 
     # ── Choose body based on whether a report was generated ───────
-    subject = f"Your C.A.S.H. Report is Ready — {client_name}"
+    subject = "Your C.A.S.H. Report Is Ready"
     if report_path is None:
         log.error("PDF generation failed — sending fallback email to client")
         body = _body_no_attachment(client_name, overall_score, overall_grade)
