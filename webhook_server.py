@@ -1434,12 +1434,20 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
     _basename = f"{slug}_{_today.strftime('%Y-%m-%d_%H%M%S')}"
 
     # ── Generate PDF (skipped when BETA_DOCX_ONLY=true) ──────────
+    # Add-On 2 (Smart Tease): generate BOTH outputs every audit —
+    #   <basename>.pdf       full report (kept on disk for internal/strategist use)
+    #   <basename>_tease.pdf 4-page Smart Tease (default email attachment)
+    # Per Dave's directive 2026-05-05: 'DO NOT SEND FULL REPORT FIRST'.
+    # Setting SEND_FULL_REPORT=1 in env reverts to attaching the full report.
     pdf_path = None
+    tease_path = None
     if not beta_docx_only:
         pdf_path = os.path.abspath(os.path.join(_report_dir, f"{_basename}.pdf"))
+        tease_path = os.path.abspath(os.path.join(_report_dir, f"{_basename}_tease.pdf"))
         _t = time.time()
         try:
-            PDFReportGenerator(config, audit_data).generate(pdf_path)
+            gen = PDFReportGenerator(config, audit_data)
+            gen.generate(pdf_path)
             if os.path.isfile(pdf_path):
                 log.info("TIMING  pdf_generation          %.2fs  (%d bytes)",
                          time.time() - _t, os.path.getsize(pdf_path))
@@ -1450,6 +1458,22 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
             log.error("PDF generation FAILED (%.2fs): %s\n%s",
                       time.time() - _t, pdf_err, traceback.format_exc())
             pdf_path = None
+
+        # Smart Tease render — separate file alongside the full report
+        _t = time.time()
+        try:
+            gen = PDFReportGenerator(config, audit_data)
+            gen.generate_tease(tease_path)
+            if os.path.isfile(tease_path):
+                log.info("TIMING  pdf_tease_generation    %.2fs  (%d bytes)",
+                         time.time() - _t, os.path.getsize(tease_path))
+            else:
+                log.warning("Tease PDF ran but file not found at: %s", tease_path)
+                tease_path = None
+        except Exception as tease_err:
+            log.error("Tease PDF generation FAILED (%.2fs): %s",
+                      time.time() - _t, tease_err)
+            tease_path = None
 
     # ── Generate DOCX ─────────────────────────────────────────────
     # Primary output in BETA_DOCX_ONLY mode; backup otherwise.
@@ -1468,8 +1492,20 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
         docx_path = None
 
     # ── Resolve which file gets emailed ───────────────────────────
-    report_attachment  = docx_path if beta_docx_only else pdf_path
-    attachment_label   = "DOCX"   if beta_docx_only else "PDF"
+    # Add-On 2: send the Smart Tease (4-page condensed) by default per Dave's
+    # GTM directive. Full report stays on disk for internal use. Set env var
+    # SEND_FULL_REPORT=1 to revert to sending the full PDF.
+    send_full = os.environ.get("SEND_FULL_REPORT", "").strip() == "1"
+    if beta_docx_only:
+        report_attachment = docx_path
+        attachment_label  = "DOCX"
+    elif tease_path and not send_full:
+        report_attachment = tease_path
+        attachment_label  = "PDF (Smart Tease)"
+        log.info("Email attachment: Smart Tease (full report kept on disk at %s)", pdf_path)
+    else:
+        report_attachment = pdf_path
+        attachment_label  = "PDF"
 
     # ── Email report ──────────────────────────────────────────────
     email_trigger_ts = datetime.utcnow().isoformat()

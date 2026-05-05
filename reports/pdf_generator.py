@@ -457,8 +457,17 @@ class PDFReportGenerator:
         self.date_str  = datetime.now().strftime("%B %d, %Y")
         self.cash      = self._resolve_cash()
         self.logo_src  = _LOGO_SRC
+        self.tease_mode = False   # Add-On 2 — set True to render Smart Tease
 
     # ── Public entry point ─────────────────────────────────────────────────────
+
+    def generate_tease(self, output_path: str):
+        """Render the 4-page Smart Tease (Add-On 2) instead of the full report."""
+        self.tease_mode = True
+        try:
+            self.generate(output_path)
+        finally:
+            self.tease_mode = False
 
     def generate(self, output_path: str):
         import logging as _logging
@@ -525,22 +534,32 @@ class PDFReportGenerator:
     # ── HTML builder ──────────────────────────────────────────────────────────
 
     def _build_html(self) -> str:
-        pages = "".join([
-            self._page_cover(),
-            # Page 2 framework explainer removed in Add-On 1 — redundant with
-            # the cover's score strip and the per-section pillar headers.
-            self._page_scorecard(),
-            self._page_executive(),
-            self._page_content(),
-            self._page_audience(),
-            self._page_sales(),
-            self._page_hold(),
-            self._page_geo(),
-            self._page_aeo(),
-            self._page_gbp_competitive(),
-            self._page_action_plan(),
-            self._page_cta(),
-        ])
+        # Tease mode (Add-On 2): 3-4 page Smart Tease Report. Reuses existing
+        # CSS + cover so design stays consistent. Activated when self.tease_mode
+        # is True (set by build_tease_pdf entry point).
+        if getattr(self, "tease_mode", False):
+            pages = "".join([
+                self._page_cover(),
+                self._page_tease_overview(),
+                self._page_tease_insights(),
+                self._page_cta(),
+            ])
+        else:
+            pages = "".join([
+                self._page_cover(),
+                # Page 2 framework explainer removed in Add-On 1.
+                self._page_scorecard(),
+                self._page_executive(),
+                self._page_content(),
+                self._page_audience(),
+                self._page_sales(),
+                self._page_hold(),
+                self._page_geo(),
+                self._page_aeo(),
+                self._page_gbp_competitive(),
+                self._page_action_plan(),
+                self._page_cta(),
+            ])
         return (f'<!DOCTYPE html><html><head><meta charset="UTF-8">'
                 f'<style>{CSS}</style></head><body>{pages}</body></html>')
 
@@ -1709,6 +1728,181 @@ class PDFReportGenerator:
             f'{_phase_block("cyan",   3, "Scale — Systems, Retention & Review",         "Days 61–90", phase3_rows)}'
         )
         return _pg(11, body, self.date_str, self.logo_src)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # SMART TEASE pages (Add-On 2) — 3-4 page condensed report. Reuses CSS,
+    # cover, and CTA from the full report; adds two condensed pages between.
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _page_tease_overview(self) -> str:
+        """Page 2 of tease: top 3 priorities + Visibility breakdown + social snapshot."""
+        ai = self.ai
+        priorities = ai.get("top_3_priorities", [])[:3]
+        exec_sum   = ai.get("executive_summary", "")
+
+        # Top 3 priorities — bullet list with priority badges (inline styles
+        # so we don't need new CSS classes)
+        prio_html = ""
+        if priorities:
+            _pri_color = {
+                "CRITICAL": "background:rgba(231,76,60,.2);color:#E74C3C;border:1px solid rgba(231,76,60,.4)",
+                "HIGH":     "background:rgba(0,174,239,.15);color:#00AEEF;border:1px solid rgba(0,174,239,.35)",
+                "MEDIUM":   "background:rgba(241,196,15,.15);color:#F1C40F;border:1px solid rgba(241,196,15,.35)",
+            }
+            prio_rows = ""
+            for p in priorities:
+                pri = p.get("priority", "MEDIUM").upper()
+                pri_style = _pri_color.get(pri, _pri_color["MEDIUM"])
+                badge = (f'<span style="{pri_style};padding:3px 10px;'
+                         f'border-radius:2px;font-size:9px;font-weight:700;'
+                         f'letter-spacing:1.5px">{_h(pri)}</span>')
+                prio_rows += (
+                    f'<tr>'
+                    f'<td style="white-space:nowrap">{badge}</td>'
+                    f'<td><strong>{_h(p.get("action", ""))}</strong>'
+                    f'<div style="font-size:11px;color:rgba(255,255,255,.55);margin-top:2px">'
+                    f'{_h(p.get("impact", ""))}</div></td>'
+                    f'<td style="white-space:nowrap;color:rgba(0,174,239,.8);font-size:11px">'
+                    f'⏱ {_h(p.get("timeline", ""))}</td>'
+                    f'</tr>'
+                )
+            prio_html = (
+                f'{_sub("Top 3 Priorities — Quick Win · Medium · Long-Term")}'
+                f'<table class="data-table">'
+                f'<tbody>{prio_rows}</tbody></table>'
+            )
+
+        # Visibility Score reminder (already on cover but worth reinforcing here
+        # so this page reads standalone if a reader skips the cover)
+        v = self.cash.get("visibility")
+        vis_html = ""
+        if v is not None:
+            seo_v = self.cash.get("visibility_seo", 50)
+            geo_v = self.cash.get("visibility_geo", 50)
+            aeo_v = self.cash.get("visibility_aeo", 50)
+            vis_html = (
+                f'{_sub("Visibility Snapshot — SEO · GEO · AEO")}'
+                f'<table class="data-table">'
+                f'<thead><tr><th>Pillar</th><th>Weight</th><th>Score</th><th>Grade</th></tr></thead>'
+                f'<tbody>'
+                f'<tr><td class="td-name">SEO (search visibility)</td><td>40%</td><td>{seo_v}/100</td><td>{_grade(seo_v)}</td></tr>'
+                f'<tr><td class="td-name">GEO (AI-engine summarisation)</td><td>35%</td><td>{geo_v}/100</td><td>{_grade(geo_v)}</td></tr>'
+                f'<tr><td class="td-name">AEO (AI answer-citation)</td><td>25%</td><td>{aeo_v}/100</td><td>{_grade(aeo_v)}</td></tr>'
+                f'<tr><td class="td-name"><strong>Visibility Composite</strong></td><td>—</td>'
+                f'<td><strong>{v}/100</strong></td><td>{_grade(v)}</td></tr>'
+                f'</tbody></table>'
+            )
+
+        # Social numbers — confidence-building data point
+        ch_data = self.config.preloaded_channel_data or {}
+        social_rows = []
+        for slot, label in [("linkedin", "LinkedIn"), ("youtube", "YouTube"),
+                             ("instagram", "Instagram"), ("facebook", "Facebook"),
+                             ("twitter", "X"), ("tiktok", "TikTok")]:
+            d = ch_data.get(slot, {}) or {}
+            followers = d.get("followers") or d.get("subscriber_count")
+            if followers:
+                ppw = d.get("posts_per_week")
+                ppw_str = f"{ppw}/wk" if ppw else "—"
+                social_rows.append(
+                    f'<tr><td class="td-name">{label}</td>'
+                    f'<td>{int(followers):,}</td><td>{ppw_str}</td></tr>'
+                )
+        social_html = ""
+        if social_rows:
+            social_html = (
+                f'{_sub("Where Your Brand Lives — Live Social Numbers")}'
+                f'<table class="data-table">'
+                f'<thead><tr><th>Channel</th><th>Followers</th><th>Cadence</th></tr></thead>'
+                f'<tbody>{"".join(social_rows)}</tbody></table>'
+            )
+
+        body = (
+            f'<div class="page-title">Executive <span>Snapshot</span></div>'
+            f'<div class="text-body" style="margin-bottom:14px">{_h(exec_sum)}</div>'
+            f'{prio_html}'
+            f'{vis_html}'
+            f'{social_html}'
+        )
+        return _pg(2, body, self.date_str, self.logo_src)
+
+    def _page_tease_insights(self) -> str:
+        """
+        Page 3 of tease: tailored insight section based on industry. Picks ONE
+        of the four CASH pillars to highlight per the directive:
+          - B2B (Agency, Financial Advisory, Legal, etc.)  → Audience focus (LinkedIn + authority)
+          - Local/Service (Home Services, Restaurant, etc.)→ Sales focus (lead capture + conversion)
+          - Content/Brand (Coach, Personal Brand)          → Hold focus (funnel + consistency)
+          - Default                                         → Lowest-scoring pillar
+        """
+        from auditors.industry_benchmarks import is_b2b, is_local_business
+        ai  = self.ai
+        ind = self.config.industry_category or self.config.client_industry or "Other"
+
+        # Pick the focus pillar
+        if is_b2b(ind):
+            focus, focus_label = "A", "Audience & Authority"
+            ai_field = ai.get("icp_alignment_verdict", "") or ai.get("channel_recommendation", "")
+        elif is_local_business(ind):
+            focus, focus_label = "S", "Sales & Lead Capture"
+            ai_field = ai.get("biggest_opportunity", "")
+        elif ind in ("Personal Brand & Creator", "Coach, Speaker & Author"):
+            focus, focus_label = "H", "Retention & Funnel Consistency"
+            ai_field = ai.get("content_strategy", "") or ai.get("biggest_opportunity", "")
+        else:
+            # Default: lowest-scoring pillar
+            scores = {k: self.cash.get(k, 50) for k in ("C", "A", "S", "H")}
+            focus = min(scores, key=scores.get)
+            focus_label = {"C": "Content & SEO", "A": "Audience & Authority",
+                           "S": "Sales & Lead Capture", "H": "Retention & Funnel"}[focus]
+            ai_field = ai.get("biggest_opportunity", "")
+
+        focus_score = self.cash.get(focus, 50)
+        focus_grade = _grade(focus_score)
+
+        # Key issues for this pillar — pull from the appropriate auditor
+        section_data = {
+            "C": self.data.get("freshness", {}),
+            "A": self.data.get("icp", {}),
+            "S": self.data.get("funnel", {}),
+            "H": self.data.get("funnel", {}),
+        }.get(focus, {})
+        issues_list = section_data.get("issues", [])[:3]
+        issues_html = ""
+        if issues_list:
+            issues_html = (
+                f'<div class="callout-red">'
+                f'<div class="callout-label">Top Gaps to Close</div>'
+                f'<ul style="margin:0;padding-left:20px;font-size:12px;line-height:1.6">'
+                f'{"".join(f"<li>{_h(i)}</li>" for i in issues_list)}'
+                f'</ul></div>'
+            )
+
+        # Biggest opportunity callout (always shown — the strategic punch)
+        opp = ai.get("biggest_opportunity", "")
+        opp_html = ""
+        if opp:
+            opp_html = (
+                f'<div class="callout-cyan">'
+                f'<div class="callout-label">⚡ Biggest Opportunity</div>'
+                f'<div class="callout-body">{_h(opp)}</div></div>'
+            )
+
+        ai_field_html = (
+            f'<div class="text-body">{_h(ai_field)}</div>' if ai_field else ""
+        )
+        body = (
+            f'<div class="page-title">Tailored Insight — <span>{_h(focus_label)}</span></div>'
+            f'<div class="text-body" style="font-size:13px;color:rgba(255,255,255,.7);margin-bottom:14px">'
+            f'Based on your industry profile (<strong>{_h(ind)}</strong>), this pillar is the '
+            f'highest-leverage focus area. Current score: '
+            f'<strong>{focus_score}/100 ({focus_grade})</strong>.'
+            f'</div>'
+            f'{ai_field_html}'
+            f'{issues_html}'
+            f'{opp_html}'
+        )
+        return _pg(3, body, self.date_str, self.logo_src)
 
     # ── PAGE 13: CTA ──────────────────────────────────────────────────────────
 
