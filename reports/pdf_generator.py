@@ -542,6 +542,7 @@ class PDFReportGenerator:
                 self._page_cover(),
                 self._page_tease_overview(),
                 self._page_tease_cash_snap(),
+                self._page_tease_insights(),
                 self._page_cta(),
             ])
         else:
@@ -2057,7 +2058,9 @@ class PDFReportGenerator:
             f'{issues_html}'
             f'{opp_html}'
         )
-        return _pg(3, body, self.date_str, self.logo_src)
+        # Tailored Insight is page 4 in the 5-page tease sequence
+        # (Cover · Exec Snapshot · CASH Snapshot · Tailored Insight · CTA).
+        return _pg(4, body, self.date_str, self.logo_src)
 
     # ── PAGE 13: CTA ──────────────────────────────────────────────────────────
 
@@ -2106,4 +2109,6 @@ class PDFReportGenerator:
             f'Book at <strong>www.gogmg.net/meeting</strong> · Report by C.A.S.H. Report by GMG · Confidential</div>'
             f'</div>'
         )
-        return _pg(12, body, self.date_str, self.logo_src)
+        # CTA is page 5 in the 5-page tease, page 12 in the full report.
+        page_num = 5 if getattr(self, "tease_mode", False) else 12
+        return _pg(page_num, body, self.date_str, self.logo_src)
