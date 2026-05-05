@@ -541,7 +541,7 @@ class PDFReportGenerator:
             pages = "".join([
                 self._page_cover(),
                 self._page_tease_overview(),
-                self._page_tease_insights(),
+                self._page_tease_cash_snap(),
                 self._page_cta(),
             ])
         else:
@@ -1837,6 +1837,149 @@ class PDFReportGenerator:
             f'{social_html}'
         )
         return _pg(2, body, self.date_str, self.logo_src)
+
+    def _page_tease_cash_snap(self) -> str:
+        """
+        Page 3 of tease: short glimpse of each C.A.S.H. pillar — score + 2 issues
+        + 2 strengths + 1 action + 1 detail per pillar. Per Dave 2026-05-05:
+        every client should leave the tease knowing where each pillar stands.
+        Replaces the prior single-pillar 'tailored insight' page so the tease
+        always covers all four pillars at a glance.
+        """
+        ai = self.ai
+        # Pull issues / strengths / recs from the right auditor for each pillar
+        freshness  = self.data.get("freshness", {}) or {}
+        brand      = self.data.get("brand", {})     or {}
+        icp        = self.data.get("icp", {})       or {}
+        funnel     = self.data.get("funnel", {})    or {}
+        web_issues = self.data.get("website", {}).get("issues", []) or []
+        web_str    = self.data.get("website", {}).get("strengths", []) or []
+        seo_issues = self.data.get("seo", {}).get("issues", []) or []
+        seo_str    = self.data.get("seo", {}).get("strengths", []) or []
+        funnel_stages = funnel.get("stages", {}) or {}
+
+        def _stage_issues(stage_key: str) -> List[str]:
+            return (funnel_stages.get(stage_key, {}) or {}).get("issues", []) or []
+
+        def _stage_strengths(stage_key: str) -> List[str]:
+            return (funnel_stages.get(stage_key, {}) or {}).get("strengths", []) or []
+
+        def _sev(s: str) -> int:
+            if "🔴" in s: return 0
+            if "🟡" in s: return 1
+            return 2
+
+        # Compose pillar inputs — 2 issues prioritised by severity, 2 strengths
+        pillars = [
+            {
+                "letter":     "C",
+                "label":      "Content",
+                "score":      self.cash.get("C", 50),
+                "issues":     sorted(seo_issues + web_issues + (freshness.get("issues", []) or []),
+                                     key=_sev)[:2],
+                "strengths":  (seo_str + web_str + (freshness.get("strengths", []) or []))[:2],
+                "recs":       (freshness.get("recommendations", []) or []),
+            },
+            {
+                "letter":     "A",
+                "label":      "Audience",
+                "score":      self.cash.get("A", 50),
+                "issues":     sorted((icp.get("issues", []) or []) + (brand.get("issues", []) or []),
+                                     key=_sev)[:2],
+                "strengths":  ((icp.get("strengths", []) or []) + (brand.get("strengths", []) or []))[:2],
+                "recs":       (icp.get("recommendations", []) or []),
+            },
+            {
+                "letter":     "S",
+                "label":      "Sales",
+                "score":      self.cash.get("S", 50),
+                "issues":     sorted(_stage_issues("capture") + _stage_issues("conversion"),
+                                     key=_sev)[:2],
+                "strengths":  (_stage_strengths("capture") + _stage_strengths("conversion"))[:2],
+                "recs":       (funnel.get("recommendations", []) or []),
+            },
+            {
+                "letter":     "H",
+                "label":      "Hold / Retention",
+                "score":      self.cash.get("H", 50),
+                "issues":     sorted(_stage_issues("nurture") + _stage_issues("trust"),
+                                     key=_sev)[:2],
+                "strengths":  (_stage_strengths("nurture") + _stage_strengths("trust"))[:2],
+                "recs":       (funnel.get("recommendations", []) or []),
+            },
+        ]
+
+        def _tile(p) -> str:
+            sc = p["score"]
+            g  = _grade(sc)
+            gcls = _gc(g)
+            issues_html = "".join(
+                f'<li style="font-size:10px;color:rgba(255,255,255,.7);'
+                f'margin-bottom:3px">{_h(i)}</li>'
+                for i in p["issues"]
+            ) or '<li style="font-size:10px;color:rgba(255,255,255,.4);font-style:italic">No critical issues detected</li>'
+            strengths_html = "".join(
+                f'<li style="font-size:10px;color:rgba(255,255,255,.7);'
+                f'margin-bottom:3px">{_h(s)}</li>'
+                for s in p["strengths"]
+            ) or '<li style="font-size:10px;color:rgba(255,255,255,.4);font-style:italic">No strengths verified yet</li>'
+
+            # Pull 1 action + 1 detail from the first available recommendation
+            top_rec = (p["recs"] or [{}])[0] if p["recs"] else {}
+            action_text = top_rec.get("action", "") if isinstance(top_rec, dict) else ""
+            detail_text = (top_rec.get("detail") or top_rec.get("impact") or "") if isinstance(top_rec, dict) else ""
+
+            action_block = ""
+            if action_text:
+                action_block = (
+                    f'<div style="margin-top:8px;padding:8px 10px;'
+                    f'background:rgba(0,174,239,.07);border-left:2px solid var(--cyan)">'
+                    f'<div style="font-size:9px;font-weight:700;letter-spacing:1.5px;'
+                    f'color:var(--cyan);margin-bottom:3px">⚡ TOP ACTION</div>'
+                    f'<div style="font-size:10px;color:#fff;margin-bottom:3px">'
+                    f'{_h(action_text[:120])}</div>'
+                )
+                if detail_text:
+                    action_block += (
+                        f'<div style="font-size:9px;color:rgba(255,255,255,.55);'
+                        f'line-height:1.4">{_h(detail_text[:160])}</div>'
+                    )
+                action_block += '</div>'
+
+            return (
+                f'<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);'
+                f'border-radius:2px;padding:12px 14px">'
+                f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
+                f'<div style="font-family:Barlow Condensed;font-size:32px;font-weight:800;'
+                f'color:{_letter_color(p["letter"])};line-height:1">{p["letter"]}</div>'
+                f'<div style="flex:1">'
+                f'<div style="font-size:10px;font-weight:700;letter-spacing:1.5px;'
+                f'color:rgba(255,255,255,.6);text-transform:uppercase">{_h(p["label"])}</div>'
+                f'<div style="font-family:Barlow Condensed;font-size:18px;font-weight:700;'
+                f'color:#fff">{sc}/100 <span class="sc-grade {gcls}" '
+                f'style="font-size:10px;margin-left:4px">{g}</span></div>'
+                f'</div></div>'
+                f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
+                f'<div><div style="font-size:9px;font-weight:700;color:#E74C3C;'
+                f'letter-spacing:1px;margin-bottom:3px">ISSUES</div>'
+                f'<ul style="margin:0;padding-left:14px">{issues_html}</ul></div>'
+                f'<div><div style="font-size:9px;font-weight:700;color:#27AE60;'
+                f'letter-spacing:1px;margin-bottom:3px">STRENGTHS</div>'
+                f'<ul style="margin:0;padding-left:14px">{strengths_html}</ul></div>'
+                f'</div>'
+                f'{action_block}'
+                f'</div>'
+            )
+
+        tiles = "".join(_tile(p) for p in pillars)
+        body = (
+            f'<div class="page-title">C.A.S.H. <span>Snapshot</span></div>'
+            f'<div class="text-body" style="font-size:12px;color:rgba(255,255,255,.6);'
+            f'margin-bottom:14px">A two-second read on each pillar — what is working, '
+            f'what is not, and your single highest-leverage move.</div>'
+            f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">{tiles}</div>'
+        )
+        return _pg(3, body, self.date_str, self.logo_src)
 
     def _page_tease_insights(self) -> str:
         """

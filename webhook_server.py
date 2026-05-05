@@ -1443,7 +1443,8 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
     tease_path = None
     if not beta_docx_only:
         pdf_path = os.path.abspath(os.path.join(_report_dir, f"{_basename}.pdf"))
-        tease_path = os.path.abspath(os.path.join(_report_dir, f"{_basename}_tease.pdf"))
+        # Per Dave 2026-05-05: client-facing tease filename is *_CASH_SNAP.pdf
+        tease_path = os.path.abspath(os.path.join(_report_dir, f"{_basename}_CASH_SNAP.pdf"))
         _t = time.time()
         try:
             gen = PDFReportGenerator(config, audit_data)
