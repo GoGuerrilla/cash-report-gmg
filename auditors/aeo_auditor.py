@@ -122,8 +122,20 @@ class AEOAuditor:
         (caller falls back to 50 stub).
         """
         if not self._anthropic_key:
+            log.info(
+                "aeo llm-eval [%s] skipped: no anthropic_api_key "
+                "(config_attr=%r env=%r)",
+                label,
+                bool(getattr(self.config, "anthropic_api_key", None)),
+                bool(os.environ.get("ANTHROPIC_API_KEY")),
+            )
             return None
         if not self._page_text:
+            pages = self.site.get("pages", []) or []
+            log.info(
+                "aeo llm-eval [%s] skipped: no page_text (pages_count=%d)",
+                label, len(pages),
+            )
             return None
         try:
             import anthropic
