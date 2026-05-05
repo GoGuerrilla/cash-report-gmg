@@ -137,16 +137,16 @@ class ICPAuditor:
                 f"Ideal buyers scanning the homepage won't self-identify as the right fit."
             )
 
-        # Linktree bio ICP check
+        # Social-bio ICP check
         bio = self.linktree.get("bio", "").lower()
         bio_hits = _icp_hit_count(bio, self.keywords)
         if bio_hits:
             strengths.append(
-                f"✅ Linktree bio mentions ICP-relevant terms: {', '.join(bio_hits[:4])}"
+                f"✅ Social bio mentions ICP-relevant terms: {', '.join(bio_hits[:4])}"
             )
         else:
             issues.append(
-                f"🔴 Linktree bio does not mention '{self.icp}'. "
+                f"🔴 Social bio does not mention '{self.icp}'. "
                 f"The first brand touchpoint fails to attract the stated ICP."
             )
 

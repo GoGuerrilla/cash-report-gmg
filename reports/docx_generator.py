@@ -1516,21 +1516,18 @@ class DocxReportGenerator:
             (c, "Configured") for c in channels_found
         ], col_widths=[Inches(1.5), Inches(4.5)])
 
+        # Add-On 1 compression: replace the multi-bullet methodology block with
+        # the single-line data-sources footer per Dave's directive.
         doc.add_paragraph()
-        self._subsection(doc, "Methodology & Data Confidence")
-        notes = [
-            "Scores are composite metrics derived from publicly accessible channel data.",
-            "Channels that block public scraping (Instagram, Facebook) are scored "
-            "at 50 (neutral). YouTube is scored from live YouTube Data API v3 data when available.",
-            "ICP alignment is assessed by comparing public content signals to the stated target market.",
-            "Intake questionnaire answers supplement scraped data for the H (Hold/Retention) section.",
-            f"Audit date: {self.date_str}  |  Data source: {self.data.get('ai_insights', {}).get('data_source', 'rule_based')}",
-        ]
-        for note in notes:
-            p = doc.add_paragraph(style="List Bullet")
-            r = p.add_run(note)
-            r.font.name = "Calibri"; r.font.size = Pt(9)
-            r.font.color.rgb = _rgb(MGRAY)
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(4)
+        r = p.add_run(
+            "Data Sources: Website crawl, SEO/GEO/AEO signals, social-platform "
+            "scrapers, client inputs. Minor score variation may occur based on "
+            "data availability."
+        )
+        r.font.name = "Calibri"; r.font.size = Pt(9)
+        r.font.color.rgb = _rgb(MGRAY)
 
         doc.add_paragraph()
         self._hairline(doc)
@@ -1640,6 +1637,14 @@ class DocxReportGenerator:
     def _issues_strengths(self, doc: Document, issues: List[str], strengths: List[str]):
         if not issues and not strengths:
             return
+        # Add-On 1 cap: top 5 of each, prioritised by severity so the most
+        # important findings always show. Keeps reports scannable.
+        def _sev(s: str) -> int:
+            if "🔴" in s: return 0
+            if "🟡" in s: return 1
+            return 2
+        issues    = sorted(issues or [], key=_sev)[:5]
+        strengths = (strengths or [])[:5]
         self._subsection(doc, "Issues & Strengths")
         max_rows = max(len(issues), len(strengths), 1)
         t = doc.add_table(rows=max_rows + 1, cols=2)

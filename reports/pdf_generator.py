@@ -315,8 +315,21 @@ def _split_row(issue: str, strength: str) -> str:
 
 
 def _split_table(issues: List[str], strengths: List[str]) -> str:
+    """
+    Issues + strengths side-by-side. Add-On 1 cap: top 5 of each, sorted by
+    severity (🔴 → 🟡 → other) so the most important findings always show.
+    Keeps reports scannable in <10s per Dave's directive.
+    """
     if not issues and not strengths:
         return ""
+
+    def _sev(s: str) -> int:
+        if "🔴" in s: return 0
+        if "🟡" in s: return 1
+        return 2
+
+    issues    = sorted(issues or [], key=_sev)[:5]
+    strengths = (strengths or [])[:5]
     max_r = max(len(issues), len(strengths))
     thead = ('<thead><tr>'
              '<th class="th-issues" style="width:50%">■ Issues to Address</th>'
@@ -514,7 +527,8 @@ class PDFReportGenerator:
     def _build_html(self) -> str:
         pages = "".join([
             self._page_cover(),
-            self._page_framework(),
+            # Page 2 framework explainer removed in Add-On 1 — redundant with
+            # the cover's score strip and the per-section pillar headers.
             self._page_scorecard(),
             self._page_executive(),
             self._page_content(),
@@ -726,7 +740,7 @@ class PDFReportGenerator:
             f'{_sub("Component Breakdown")}'
             f'{comp_table}'
         )
-        return _pg(3, body, self.date_str, self.logo_src)
+        return _pg(2, body, self.date_str, self.logo_src)
 
     # ── PAGE 4: Executive Summary ─────────────────────────────────────────────
 
@@ -789,7 +803,7 @@ class PDFReportGenerator:
         if strategy:
             body += f'<div class="strategy-box">{_h(strategy)}</div>'
 
-        return _pg(4, body, self.date_str, self.logo_src)
+        return _pg(3, body, self.date_str, self.logo_src)
 
     # ── PAGE 5: Content (C) ───────────────────────────────────────────────────
 
@@ -892,7 +906,7 @@ class PDFReportGenerator:
                 f'</div>'
             )
 
-        return _pg(5, body, self.date_str, self.logo_src)
+        return _pg(4, body, self.date_str, self.logo_src)
 
     # ── PAGE 6: Audience (A) ──────────────────────────────────────────────────
 
@@ -1132,7 +1146,7 @@ class PDFReportGenerator:
         if strategy:
             body += f'<div class="strategy-box">{_h(strategy)}</div>'
 
-        return _pg(6, body, self.date_str, self.logo_src)
+        return _pg(5, body, self.date_str, self.logo_src)
 
     def _section_linkedin_fallback(self) -> str:
         return (
@@ -1215,7 +1229,7 @@ class PDFReportGenerator:
         if budget_rec:
             body += f'<div class="strategy-box">{_h(budget_rec)}</div>'
 
-        return _pg(7, body, self.date_str, self.logo_src)
+        return _pg(6, body, self.date_str, self.logo_src)
 
     # ── PAGE 8: Hold (H) ─────────────────────────────────────────────────────
 
@@ -1307,7 +1321,7 @@ class PDFReportGenerator:
         ])
         body += f'{_sub("Retention Recommendations")}{_rec_table(hold_rec_rows)}'
 
-        return _pg(8, body, self.date_str, self.logo_src)
+        return _pg(7, body, self.date_str, self.logo_src)
 
     # ── PAGE 9: GEO ───────────────────────────────────────────────────────────
 
@@ -1412,7 +1426,7 @@ class PDFReportGenerator:
         if geo_rec_rows:
             body += f'{_sub("GEO Recommendations")}{_rec_table(geo_rec_rows)}'
 
-        return _pg(9, body, self.date_str, self.logo_src)
+        return _pg(8, body, self.date_str, self.logo_src)
 
     # ── PAGE 10: AEO (Answer Engine Optimisation) ─────────────────────────────
 
@@ -1488,7 +1502,7 @@ class PDFReportGenerator:
         )
         if aeo_rec_rows:
             body += f'{_sub("AEO Recommendations")}{_rec_table(aeo_rec_rows)}'
-        return _pg(10, body, self.date_str, self.logo_src)
+        return _pg(9, body, self.date_str, self.logo_src)
 
     # ── PAGE 11: GBP + Competitive ────────────────────────────────────────────
 
@@ -1634,7 +1648,7 @@ class PDFReportGenerator:
         if insights:
             body += f'<div class="strategy-box">{_h(insights[0])}</div>'
 
-        return _pg(11, body, self.date_str, self.logo_src)
+        return _pg(10, body, self.date_str, self.logo_src)
 
     # ── PAGE 12: 90-Day Action Plan ───────────────────────────────────────────
 
@@ -1694,7 +1708,7 @@ class PDFReportGenerator:
             f'{_phase_block("orange", 2, "Authority — Build Proof & Pipeline",          "Days 31–60", phase2_rows)}'
             f'{_phase_block("cyan",   3, "Scale — Systems, Retention & Review",         "Days 61–90", phase3_rows)}'
         )
-        return _pg(12, body, self.date_str, self.logo_src)
+        return _pg(11, body, self.date_str, self.logo_src)
 
     # ── PAGE 13: CTA ──────────────────────────────────────────────────────────
 
@@ -1730,29 +1744,17 @@ class PDFReportGenerator:
             f'<div class="cs-item"><div class="cs-label">Schedule</div>'
             f'<div class="cs-value highlight">www.gogmg.net/meeting</div></div>'
             f'</div>'
-            f'{_sub("Appendix — Methodology &amp; Data Sources")}'
-            f'<table class="app-table">'
-            f'<thead><tr><th>Data Source</th><th>What It Measures</th></tr></thead>'
-            f'<tbody>'
-            f'<tr><td class="app-source">PageSpeed Insights API</td>'
-            f'<td>Website performance, Core Web Vitals, mobile SEO</td></tr>'
-            f'<tr><td class="app-source">Website Scraping (Playwright)</td>'
-            f'<td>Technical checks, content analysis, conversion elements</td></tr>'
-            f'<tr><td class="app-source">Google Maps HTML</td>'
-            f'<td>GBP listing confirmation, NAP detection</td></tr>'
-            f'<tr><td class="app-source">YouTube Data API v3</td>'
-            f'<td>Channel subscribers, upload recency</td></tr>'
-            f'<tr><td class="app-source">Google Analytics 4</td>'
-            f'<td>Traffic, bounce rate, session duration</td></tr>'
-            f'<tr><td class="app-source">Google Search Console</td>'
-            f'<td>Keyword rankings, clicks, impressions</td></tr>'
-            f'<tr><td class="app-source">Rule-based / Claude AI Analyzer</td>'
-            f'<td>CASH scoring, issue weighting, action plan generation</td></tr>'
-            f'</tbody></table>'
+            f'<div style="margin-top:18px;padding:12px 16px;'
+            f'background:rgba(255,255,255,.03);border-left:2px solid rgba(0,174,239,.4);'
+            f'font-size:10px;color:rgba(255,255,255,.45);line-height:1.5">'
+            f'<strong style="color:rgba(255,255,255,.7)">Data Sources:</strong> '
+            f'Website crawl, SEO/GEO/AEO signals, social-platform scrapers, client inputs. '
+            f'Minor score variation may occur based on data availability.'
+            f'</div>'
             f'<div class="callout-cyan">'
             f'<div class="callout-label">Recommended Next Step</div>'
             f'<div class="callout-body">Schedule a follow-up audit in 90 days to measure progress. '
             f'Book at <strong>www.gogmg.net/meeting</strong> · Report by C.A.S.H. Report by GMG · Confidential</div>'
             f'</div>'
         )
-        return _pg(13, body, self.date_str, self.logo_src)
+        return _pg(12, body, self.date_str, self.logo_src)

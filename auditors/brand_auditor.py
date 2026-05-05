@@ -83,10 +83,10 @@ class BrandAuditor:
         icp_hits = [kw for kw in icp_keywords if kw in bio_lower]
 
         if icp_hits:
-            strengths.append(f"✅ Linktree bio references target market language: {', '.join(icp_hits)}")
+            strengths.append(f"✅ Social bio references target market language: {', '.join(icp_hits)}")
         else:
             issues.append(
-                f"🔴 Linktree bio does NOT mention stated target market "
+                f"🔴 Social bio does NOT mention stated target market "
                 f"('{self.config.stated_target_market}'). "
                 f"Bio says: '{bio[:120]}...'"
             )
@@ -111,11 +111,11 @@ class BrandAuditor:
             )
 
         if not bio:
-            issues.append("🔴 Linktree bio is empty — first touchpoint has no positioning.")
+            issues.append("🔴 Social bio is empty — first touchpoint has no positioning.")
         elif len(bio) < 50:
-            issues.append("🟡 Linktree bio is very short — missed opportunity to communicate value prop.")
+            issues.append("🟡 Social bio is very short — missed opportunity to communicate value prop.")
         else:
-            strengths.append("✅ Linktree bio has descriptive content.")
+            strengths.append("✅ Social bio has descriptive content.")
 
         return {"issues": issues, "strengths": strengths, "bio_text": bio}
 
@@ -254,14 +254,14 @@ class BrandAuditor:
         issues, strengths = [], []
         preloaded = self.preloaded
 
-        # Check if website messaging matches Linktree
+        # Check if website messaging matches social bio
         website_audience = preloaded.get("website", {}).get("target_audience_mentioned", "")
         linktree_bio = self.linktree.get("bio", "")
         if website_audience and linktree_bio:
             if website_audience.lower() not in linktree_bio.lower():
                 issues.append(
                     f"🟡 Website target audience ('{website_audience}') "
-                    f"not reflected in Linktree bio — fragmented first impressions."
+                    f"not reflected in social bio — fragmented first impressions."
                 )
 
         # Value prop check
@@ -358,7 +358,7 @@ class BrandAuditor:
             recs.append({
                 "priority": "HIGH",
                 "action": (
-                    "Rewrite Linktree bio to speak directly to "
+                    "Rewrite primary social bio to speak directly to "
                     f"'{self.config.stated_target_market}'"
                 ),
                 "reason": "First touchpoint must immediately signal relevance to the stated ICP.",
@@ -367,7 +367,7 @@ class BrandAuditor:
         else:
             recs.append({
                 "priority": "HIGH",
-                "action": "Define a stated target market and rewrite Linktree bio to speak to it directly",
+                "action": "Define a stated target market and rewrite primary social bio to speak to it directly",
                 "reason": "First touchpoint must signal relevance, but no ICP is currently stated.",
                 "impact": "Higher link-click conversion from the right audience once defined.",
             })

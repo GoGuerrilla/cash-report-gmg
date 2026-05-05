@@ -123,7 +123,7 @@ class FunnelAuditor:
         if email:
             strengths.append(f"✅ Direct email contact available: {email}")
         else:
-            issues.append("🟡 No email address visible on Linktree — removes a contact option.")
+            issues.append("🟡 No public email address visible — removes a contact option.")
 
         return {"issues": issues, "strengths": strengths}
 
@@ -216,11 +216,11 @@ class FunnelAuditor:
                 "B2B buyers need a specific, low-friction next step."
             )
 
-        # Check Linktree for direct conversion link
+        # Check social-bio classified links for direct conversion path
         links = self.linktree.get("classified_links", {})
         booking_links = links.get("Website", [])
         if booking_links:
-            strengths.append("✅ Website link on Linktree provides path to conversion.")
+            strengths.append("✅ Public website link present — provides path to conversion.")
 
         return {"issues": issues, "strengths": strengths}
 

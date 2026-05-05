@@ -512,6 +512,21 @@ REQUIRED instead — every recommendation must:
 
 If you cannot make a recommendation specific using the data above, do not include it at all. A shorter, more specific output is always better than a longer, more generic one.
 
+LENGTH CAPS (HARD LIMITS — readers scan, not read):
+  • executive_summary       — 2 sentences MAX. ~50 words.
+  • biggest_opportunity     — 4 sentences MAX. Bullets allowed if it tightens the prose.
+  • biggest_waste           — 3 sentences MAX.
+  • icp_alignment_verdict   — 2 sentences MAX.
+  • channel_recommendation  — 4 sentences MAX. Prefer 1-line directives over flowing prose.
+  • content_strategy        — 4 sentences MAX.
+  • budget_recommendation   — 3 sentences MAX.
+  • competitive_positioning — 3 sentences MAX.
+  • Each top_3_priorities[].action / impact — 1 sentence each. Same for 90_day_action_plan[].action / outcome.
+
+NO TRANSITIONAL FLUFF — drop 'In addition,' / 'Furthermore,' / 'Moreover,' / 'It's important to note that' / 'As mentioned earlier,' / 'Building on this,'. Every sentence stands alone and earns its place.
+
+NO REPEATED INSIGHTS — if you state a finding (e.g., 'no lead magnet'), do not restate it in another field. Reference it ('per the lead-magnet gap above') or escalate it ('the lead-magnet gap compounds with the 13.8s LCP').
+
 MINDSET CHECK — before finalizing each field, ask:
   1. Is this actually accurate based on the audit data above?
   2. Is this specific to THIS client (not boilerplate that could apply to any client)?
@@ -1126,7 +1141,7 @@ Respond with ONLY this exact JSON (no markdown fences, no extra keys):
             {
                 "week":    "1-2",
                 "action":  (
-                    f"Rewrite Linktree bio, LinkedIn headline, and website homepage copy "
+                    f"Rewrite primary social bio, LinkedIn headline, and website homepage copy "
                     f"to speak directly to {config.stated_target_market}. "
                     f"Remove Web3/crypto language from all public-facing channels."
                     if icp_score < 50
@@ -1139,7 +1154,7 @@ Respond with ONLY this exact JSON (no markdown fences, no extra keys):
                 "action":  (
                     "Build and publish an ICP-specific lead magnet "
                     f"(e.g. 'Free Marketing Audit for {config.stated_target_market.split(',')[0]}s'). "
-                    "Add email opt-in to website and Linktree."
+                    "Add email opt-in to website and primary social bio."
                     if not config.has_lead_magnet
                     else "Set up 5-email welcome sequence for new list subscribers."
                 ),
