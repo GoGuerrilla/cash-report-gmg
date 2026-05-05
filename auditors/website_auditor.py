@@ -162,6 +162,10 @@ def _adapt_apify_to_pages(apify_result: dict) -> List[Dict]:
             "external_links":          0,
             "cta_count":               len(ctas),
             "word_count":              len(text.split()),
+            # Raw page text preserved for AEO LLM-eval (capped at 6000 chars
+            # per page to keep audit_data dict reasonable). Unused by other
+            # consumers — they read structured fields like title/h1_text.
+            "text":                    (text or "")[:6000],
             "has_phone":               has_phone,
             "has_email_visible":       has_email,
             "lead_magnet_url":         lead_magnet_url,
