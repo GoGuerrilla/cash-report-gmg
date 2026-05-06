@@ -635,9 +635,12 @@ def fetch(base_url: str, sitemap_urls: Optional[List[str]] = None) -> Dict[str, 
     pages:      List[Dict] = []
     blog_posts: List[Dict] = []
     all_links:  List[Dict] = []
-    platform_hints         = ["unknown"]
+    # Accumulate platform hints across every crawled page — a CDN-cached or
+    # JS-stripped homepage often hides Wix/Squarespace fingerprints that show
+    # up on inner pages (blog posts, /about, /contact). Only fall back to
+    # "unknown" if no page across the entire crawl shows a signal.
+    platform_hint_set: set = set()
     max_depth              = 0
-    homepage_platform_done = False
 
     for item in items:
         url = (item.get("url") or item.get("loadedUrl") or "").strip()
@@ -682,9 +685,13 @@ def fetch(base_url: str, sitemap_urls: Optional[List[str]] = None) -> Dict[str, 
         # ── Parse — structural parsers use full DOM ───────────────────────────
         soup = BeautifulSoup(html, "html.parser")
 
-        if not homepage_platform_done:
-            platform_hints         = _detect_platform_hints(html)
-            homepage_platform_done = True
+        # Union platform hints from every page — first hit wins for ordering
+        # but we keep collecting so a homepage that drops the fingerprint
+        # doesn't leave the audit with platform="unknown" when later pages
+        # clearly identify it.
+        for hint in _detect_platform_hints(html):
+            if hint != "unknown":
+                platform_hint_set.add(hint)
 
         headings    = _parse_headings(soup)
         struct_data = _parse_structured_data(soup)
@@ -712,6 +719,18 @@ def fetch(base_url: str, sitemap_urls: Optional[List[str]] = None) -> Dict[str, 
                 "ctas":             _parse_ctas(soup),
                 "images":           _parse_images(soup, url),
             })
+
+    # Order hints by precedence so the first element is the primary platform
+    # for display. Falls back to ["unknown"] only when no page across the
+    # entire crawl matched any signature.
+    _PRECEDENCE = ["wix", "squarespace", "webflow", "shopify", "wordpress",
+                   "cloudflare"]
+    if platform_hint_set:
+        platform_hints = ([p for p in _PRECEDENCE if p in platform_hint_set]
+                          + sorted(platform_hint_set
+                                   - set(_PRECEDENCE)))
+    else:
+        platform_hints = ["unknown"]
 
     _log.info(
         "apify_content: %s — pages=%d  blog_posts=%d  links=%d  "

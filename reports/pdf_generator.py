@@ -1159,6 +1159,35 @@ class PDFReportGenerator:
                     'margin-top:-10px;margin-bottom:14px">'
                     '&#185;See LinkedIn Presence section for details</p>'
                 )
+        elif self.config.website_url:
+            # No social handles found in intake or via website footer/header
+            # crawl. Per data-integrity rule: render an honest panel listing
+            # the platforms we checked rather than silently omitting the
+            # section. Absence of a discoverable footprint is itself a
+            # finding the reader needs to see.
+            checked_rows = "".join(
+                f'<tr><td class="td-name">{label}</td>'
+                f'<td>{_sdot("r")}{_sbadge("critical", "Not detected")}</td></tr>'
+                for label in ("LinkedIn", "YouTube", "Instagram", "Facebook",
+                              "X", "TikTok")
+            )
+            body += (
+                f'{_sub("Social Media Snapshot")}'
+                f'<div class="text-body" style="font-size:12px;'
+                f'color:rgba(255,255,255,.7);margin-bottom:10px">'
+                f'No social profile links were detected during the website '
+                f'crawl, and no handles were provided in the intake. The audit '
+                f'checked the homepage and footer for outbound links to each '
+                f'major platform — none resolved. For service businesses this '
+                f'is a discoverability gap that depresses both the Audience '
+                f'pillar (no Social Media Composite signal) and the GEO/AEO '
+                f'Brand Authority score (AI engines weight cross-platform '
+                f'presence as an entity-trust signal).'
+                f'</div>'
+                f'<table class="data-table">'
+                f'<thead><tr><th>Platform</th><th>Status</th></tr></thead>'
+                f'<tbody>{checked_rows}</tbody></table>'
+            )
 
         if li_fallback:
             body += self._section_linkedin_fallback()
@@ -1533,6 +1562,29 @@ class PDFReportGenerator:
         gbp_score = gbp.get("score", 50)
         gbp_grade = _grade(gbp_score)
 
+        # Data-source attribution — distinguishes website-derived signals from
+        # verified Google Places API data. Per Dave 2026-05-06: presenting
+        # phone/completeness as if pulled from the GBP listing when they were
+        # actually scraped from the client's website is a fabrication the
+        # reader can't see through. Show the source explicitly.
+        gbp_source = gbp.get("data_source", "")
+        is_verified_gbp = (gbp_source == "google_places_api")
+        source_caveat = ""
+        if not is_verified_gbp:
+            source_caveat = (
+                f'<div class="text-body" style="font-size:11px;'
+                f'color:rgba(255,255,255,.65);margin-bottom:12px;'
+                f'border-left:2px solid rgba(255,193,7,.5);padding-left:10px">'
+                f'<b>Data source:</b> website crawl (NAP/schema/Maps-link '
+                f'detection) plus a Google Maps search-result lookup. We do '
+                f'not currently call the Google Places API, so phone, address, '
+                f'and signal-coverage values below reflect what is publicly '
+                f'visible on the client\'s website — not what is filed in the '
+                f'verified Google Business Profile. Use this section to spot '
+                f'NAP gaps the owner can fix on the website itself.'
+                f'</div>'
+            )
+
         # GBP grid
         gbp_name     = _h(gbp.get("business_name", self.config.client_name))
         gbp_address  = _h(gbp.get("address") or "—")
@@ -1543,11 +1595,14 @@ class PDFReportGenerator:
         # Google Maps HTML and frequently match unrelated numbers. Show
         # 'Unverified' instead. Real counts (Places API path) still display.
         if _gbp_rc and gbp.get("review_count_verified", True):
-            gbp_reviews = str(_gbp_rc)
+            gbp_reviews     = str(_gbp_rc)
+            gbp_reviews_cls = "td-good"
         elif _gbp_rc:
-            gbp_reviews = "Unverified"
+            gbp_reviews     = "Unverified"
+            gbp_reviews_cls = "td-warn"
         else:
-            gbp_reviews = "—"
+            gbp_reviews     = "—"
+            gbp_reviews_cls = ""
         gbp_hrs      = gbp.get("hours_listed", False)
         # 'Verified' label is misleading without paid Google API confirmation —
         # we only know the listing was found in Maps search, not that the
@@ -1556,17 +1611,48 @@ class PDFReportGenerator:
         gbp_listing_found = gbp.get("is_likely_verified", gbp.get("found", False))
         gbp_nap      = gbp.get("nap_consistent", False)
         gbp_complete = gbp.get("completeness_pct", 0) or 0
+        # Phone/address suffixes — when the value came from website schema or
+        # page text (not Places API), append a small attribution so the reader
+        # doesn't read it as GBP-verified.
+        site_phone   = gbp.get("site_phone", "")
+        schema_phone = (gbp.get("score_breakdown", {}).get("schema_markup", 0) or 0) > 0
+        phone_suffix = ""
+        if not is_verified_gbp and (site_phone or gbp.get("phone")):
+            src = "schema markup" if schema_phone and site_phone == "" else "website"
+            phone_suffix = (
+                f'<div style="font-size:9px;color:rgba(255,255,255,.4);'
+                f'margin-top:2px">from {src} — verify against GBP</div>'
+            )
+        addr_suffix = ""
+        if not is_verified_gbp and gbp.get("address"):
+            addr_suffix = (
+                f'<div style="font-size:9px;color:rgba(255,255,255,.4);'
+                f'margin-top:2px">from website — verify against GBP</div>'
+            )
+        # Profile Complete is misleading: it measures how many of 5 signals
+        # (listing/phone/address/reviews/schema) we found via website crawl,
+        # NOT how complete the actual GBP listing is. Relabel honestly.
+        complete_label = (
+            "Profile Complete" if is_verified_gbp else "Web Signal Coverage"
+        )
+        complete_suffix = ""
+        if not is_verified_gbp:
+            complete_suffix = (
+                f'<div style="font-size:9px;color:rgba(255,255,255,.4);'
+                f'margin-top:2px">% of NAP/schema/Maps signals on website — '
+                f'not GBP completeness</div>'
+            )
 
         gbp_grid = (
             f'<div class="gbp-grid">'
             f'<div class="gbp-field"><div class="gbp-field-label">Business Name</div>'
             f'<div class="gbp-field-value">{gbp_name}</div></div>'
             f'<div class="gbp-field"><div class="gbp-field-label">Address</div>'
-            f'<div class="gbp-field-value">{gbp_address}</div></div>'
+            f'<div class="gbp-field-value">{gbp_address}{addr_suffix}</div></div>'
             f'<div class="gbp-field"><div class="gbp-field-label">Phone</div>'
-            f'<div class="gbp-field-value">{gbp_phone}</div></div>'
+            f'<div class="gbp-field-value">{gbp_phone}{phone_suffix}</div></div>'
             f'<div class="gbp-field"><div class="gbp-field-label">Reviews</div>'
-            f'<div class="gbp-field-value td-good">{gbp_reviews}</div></div>'
+            f'<div class="gbp-field-value {gbp_reviews_cls}">{gbp_reviews}</div></div>'
             f'<div class="gbp-field"><div class="gbp-field-label">Hours Visible</div>'
             f'<div class="gbp-field-value {"td-good" if gbp_hrs else "td-bad"}">'
             f'{_sdot("g") if gbp_hrs else _sdot("r")}{"Yes" if gbp_hrs else "No"}</div></div>'
@@ -1577,10 +1663,12 @@ class PDFReportGenerator:
             f'<div class="gbp-field"><div class="gbp-field-label">NAP Consistent</div>'
             f'<div class="gbp-field-value {"td-good" if gbp_nap else "td-warn"}">'
             f'{_sdot("g") if gbp_nap else _sdot("y")}{"Yes" if gbp_nap else "Check needed"}</div></div>'
-            f'<div class="gbp-field"><div class="gbp-field-label">Profile Complete</div>'
-            f'<div class="gbp-field-value {"td-warn" if gbp_complete < 80 else "td-good"}">{gbp_complete}%</div></div>'
+            f'<div class="gbp-field"><div class="gbp-field-label">{complete_label}</div>'
+            f'<div class="gbp-field-value {"td-warn" if gbp_complete < 80 else "td-good"}">'
+            f'{gbp_complete}%{complete_suffix}</div></div>'
             f'</div>'
         )
+        gbp_grid = source_caveat + gbp_grid
 
         # Competitor table
         competitors = comp.get("competitors", [])

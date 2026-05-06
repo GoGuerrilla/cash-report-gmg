@@ -36,7 +36,7 @@ Scoring rubric (100 pts total)
   Schema.org LocalBusiness       15 pts  — full (15), partial (8), absent (0)
   NAP self-consistency           10 pts  — schema phone matches page-text phone
 
-  Floor: 25.  Listing confirmed but sparse → floor 35.
+  Floor: 0 when no listing confirmed. Listing confirmed but sparse → 35.
 """
 import re
 import json
@@ -394,11 +394,15 @@ class GBPAuditor:
         nap_score = 5 if s["nap_consistent"] else 0
         score    += nap_score
 
-        # Floor: listing confirmed but sparse data → at least D range
+        # Score honesty: only floor when an actual GBP listing was confirmed
+        # (Tier 1 maps link/embed or Tier 2 maps_html name match). For
+        # businesses with zero detectable GBP signal, the score must reflect
+        # that reality — no synthetic baseline. Per Dave 2026-05-06: a 25-pt
+        # floor was masking businesses that genuinely have no presence.
         listing_confirmed = listing_score > 0
         if listing_confirmed:
             score = max(35, score)
-        score = max(25, min(100, score))
+        score = max(0, min(100, score))
 
         # Completeness proxy for display
         completeness_fields = {
