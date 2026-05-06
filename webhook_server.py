@@ -1300,6 +1300,36 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
 
         _merge_website_data(channel_data, audit_data["website"])
 
+        # GBP signal upgrade — re-scan ALL pages crawled by Apify for review
+        # CTAs, Maps links, Maps embeds, phone, address, schema. The original
+        # GBPAuditor only checks the homepage and one heuristic secondary
+        # path; sites with custom slugs (Swift Profit Systems' /about-elliot,
+        # 2026-05-06) leave review CTAs on pages it never visits and the
+        # report falsely calls them missing. This pass piggy-backs on data
+        # already on disk — no new HTTP requests.
+        try:
+            from auditors.gbp_auditor import upgrade_with_pages as _gbp_upgrade
+            _t = time.time()
+            _pages = audit_data["website"].get("pages", []) or []
+            audit_data["gbp"] = _gbp_upgrade(
+                audit_data.get("gbp", {}) or {},
+                _pages,
+                business_name=config.client_name or "",
+            )
+            log.info(
+                "GBP signal upgrade: pages_scanned=%d  score=%s  "
+                "review_cta=%s  maps_link=%s  phone=%s",
+                audit_data["gbp"].get("pages_rescanned", 0),
+                audit_data["gbp"].get("score"),
+                bool(audit_data["gbp"].get("score_breakdown", {})
+                                            .get("reviews_promoted")),
+                bool(audit_data["gbp"].get("place_url")),
+                audit_data["gbp"].get("phone") or "—",
+            )
+            log.info("TIMING  gbp_upgrade            %.2fs", time.time() - _t)
+        except Exception as exc:
+            log.warning("GBP signal upgrade failed: %s — keeping homepage-only result", exc)
+
         # Push 6 Stage 1 — re-classify industry using audit-time SEO signals
         # when intake-time inference fell to 'Other'. Homepage title, meta, h1,
         # and page slugs often carry clear category cues (e.g. 'Strategic

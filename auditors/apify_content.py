@@ -447,6 +447,32 @@ def _parse_internal_links(soup, page_url: str, domain: str) -> List[Dict]:
     return links
 
 
+def _parse_external_links(soup, page_url: str, domain: str) -> List[Dict]:
+    """Extract OFF-domain links (Maps, social, review pages, etc.) from full
+    DOM. Required by GBP/social auditors to detect signals like a Google
+    review CTA or Maps embed that live on inner pages — not just the
+    homepage. Deduplicates by to_url."""
+    links = []
+    seen: set = set()
+    for a in soup.find_all("a", href=True):
+        href = a.get("href", "").strip()
+        if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+            continue
+        full   = urljoin(page_url, href)
+        parsed = urlparse(full)
+        if not parsed.netloc or parsed.netloc == domain:
+            continue
+        if full in seen:
+            continue
+        seen.add(full)
+        links.append({
+            "from_url":    page_url,
+            "to_url":      full,
+            "anchor_text": a.get_text(" ", strip=True) or None,
+        })
+    return links
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 #  Blog item detection
 # ═════════════════════════════════════════════════════════════════════════════
@@ -718,6 +744,17 @@ def fetch(base_url: str, sitemap_urls: Optional[List[str]] = None) -> Dict[str, 
                 "forms":            _parse_forms(soup, url),
                 "ctas":             _parse_ctas(soup),
                 "images":           _parse_images(soup, url),
+                # External hrefs feed the GBP/social signal-upgrade pass so
+                # auditors can detect a Maps link, Google review CTA, or
+                # social profile that lives on an inner page (e.g. /about)
+                # rather than the homepage.
+                "external_links":   _parse_external_links(soup, url, domain),
+                # Iframe srcs feed GBP Maps-embed detection on inner pages.
+                "iframe_srcs":      [
+                    iframe.get("src", "").strip()
+                    for iframe in soup.find_all("iframe", src=True)
+                    if iframe.get("src", "").strip()
+                ],
             })
 
     # Order hints by precedence so the first element is the primary platform

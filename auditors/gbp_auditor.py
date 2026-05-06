@@ -587,3 +587,207 @@ class GBPAuditor:
         if score >= 50: return "C"
         if score >= 35: return "D"
         return "F"
+
+
+def upgrade_with_pages(
+    gbp_result: Dict[str, Any],
+    pages:      List[Dict[str, Any]],
+    business_name: str = "",
+) -> Dict[str, Any]:
+    """
+    Re-scan all crawled pages for GBP signals the original GBPAuditor missed.
+
+    The auditor's own scrape only checks the homepage and one heuristic
+    secondary path (/contact, /contact-us, /about). Sites with custom
+    slugs (Swift Profit Systems' /about-elliot, 2026-05-06) leave review
+    CTAs and Maps links on pages the auditor never visited, producing
+    false "no review CTA" findings. This pass piggy-backs on the Apify
+    content crawl so we read what's already on disk — no new requests.
+
+    Returns an updated copy of gbp_result with rescored signals. Issues
+    and strengths are recomputed from the upgraded signal set.
+    """
+    if not gbp_result or not pages:
+        return gbp_result
+
+    # Reconstruct the signals dict from the existing result. Anything that
+    # was already True stays True (we only upgrade — never downgrade — to
+    # match the "rescan finds more, never less" expectation).
+    s: Dict[str, Any] = {
+        "maps_link_on_site":   bool(gbp_result.get("place_url")
+                                    or gbp_result.get("website_listed")),
+        "maps_link_url":       gbp_result.get("place_url", "") or "",
+        "maps_embed_on_site":  False,  # not preserved in result; rederive
+        "review_link_on_site": False,
+        "review_cta_on_site":  False,
+        "site_phone":          gbp_result.get("site_phone", "")
+                                or gbp_result.get("phone", "") or "",
+        "site_address":        gbp_result.get("address", "") or "",
+        "schema_quality":      gbp_result.get("schema_quality", 0) or 0,
+        "schema_phone":        "",
+        "schema_address":      gbp_result.get("address", "") or "",
+        "maps_html_confirmed": gbp_result.get("maps_html_confirmed", False),
+        "maps_rating":         gbp_result.get("rating"),
+        "maps_review_count":   gbp_result.get("review_count", 0) or 0,
+        "maps_phone":          "",
+        "review_count_verified": gbp_result.get("review_count_verified", True),
+        "review_count_method":   gbp_result.get("review_count_method", "none"),
+        "nap_consistent":      gbp_result.get("nap_consistent", False),
+    }
+
+    # Walk every page — text, external_links, iframe_srcs, structured_data
+    pages_scanned = 0
+    for p in pages:
+        if not isinstance(p, dict):
+            continue
+        pages_scanned += 1
+
+        text = p.get("text") or ""
+
+        # 1. Review CTA text — Dave 2026-05-06: SPR has a Google review CTA
+        # on /about-elliot that the homepage-only scan missed.
+        if not s["review_cta_on_site"] and text and _REVIEW_CTA_RE.search(text):
+            s["review_cta_on_site"] = True
+
+        # 2. Phone in page text — fill in if not already detected
+        if not s["site_phone"] and text:
+            m = _PHONE_RE.search(text)
+            if m:
+                s["site_phone"] = m.group(0)
+
+        # 3. External links — Maps URL + Google review URL detection
+        for link in p.get("external_links", []) or []:
+            href = (link.get("to_url") or "")
+            if not href:
+                continue
+            if not s["maps_link_on_site"] and _MAPS_LINK_RE.search(href):
+                s["maps_link_on_site"] = True
+                if not s["maps_link_url"]:
+                    s["maps_link_url"] = href
+            if not s["review_link_on_site"] and _REVIEW_LINK_RE.search(href):
+                s["review_link_on_site"] = True
+
+        # 4. Iframe Maps embeds
+        for src in p.get("iframe_srcs", []) or []:
+            if "google.com/maps" in src or "maps.google.com" in src:
+                s["maps_embed_on_site"] = True
+                break
+
+        # 5. Schema.org LocalBusiness on inner pages
+        for item in p.get("structured_data", []) or []:
+            if not isinstance(item, dict):
+                continue
+            stype = item.get("@type", "")
+            if not any(t in str(stype) for t in _SCHEMA_TYPES):
+                continue
+            tel  = item.get("telephone", "")
+            addr = item.get("address", {})
+            name = item.get("name", "")
+            url  = item.get("url", "")
+            if tel and not s["schema_phone"]:
+                s["schema_phone"] = tel
+            if isinstance(addr, dict) and not s["schema_address"]:
+                parts = [addr.get("streetAddress",""),
+                         addr.get("addressLocality",""),
+                         addr.get("addressRegion","")]
+                joined = ", ".join(p_ for p_ in parts if p_)
+                if joined:
+                    s["schema_address"] = joined
+            elif isinstance(addr, str) and addr and not s["schema_address"]:
+                s["schema_address"] = addr
+            fields_present = sum(bool(x) for x in (name, tel, addr, url))
+            new_quality = 2 if fields_present >= 3 else (1 if fields_present >= 1 else 0)
+            if new_quality > s["schema_quality"]:
+                s["schema_quality"] = new_quality
+
+    # NAP consistency re-check across the upgraded signal set
+    phones = [p_ for p_ in (s["schema_phone"], s["site_phone"], s["maps_phone"]) if p_]
+    if len(phones) >= 2:
+        normed = [_normalise_phone(p_) for p_ in phones]
+        s["nap_consistent"] = len(set(normed)) == 1
+
+    # Re-score using the same rubric as the original auditor
+    score = 0
+    if s["maps_link_on_site"]:
+        listing_score = 35
+    elif s["maps_embed_on_site"]:
+        listing_score = 28
+    elif s["maps_html_confirmed"]:
+        listing_score = 20
+    else:
+        listing_score = 0
+    score += listing_score
+
+    effective_phone   = s["schema_phone"] or s["site_phone"] or s["maps_phone"]
+    effective_address = s["schema_address"] or s["site_address"]
+    phone_score   = 12 if effective_phone   else 0
+    address_score = 13 if effective_address else 0
+    score += phone_score + address_score
+
+    if s["review_link_on_site"]:
+        review_score = 25
+    elif s["review_cta_on_site"]:
+        review_score = 18
+    elif s["maps_rating"] is not None:
+        review_score = 12 if s["maps_rating"] >= 4.5 else 8
+    else:
+        review_score = 0
+    score += review_score
+
+    schema_score = {0: 0, 1: 8, 2: 15}[s["schema_quality"]]
+    score += schema_score
+
+    nap_score = 5 if s["nap_consistent"] else 0
+    score += nap_score
+
+    listing_confirmed = listing_score > 0
+    if listing_confirmed:
+        score = max(35, score)
+    score = max(0, min(100, score))
+
+    completeness_fields = {
+        "listing": listing_confirmed,
+        "phone":   bool(effective_phone),
+        "address": bool(effective_address),
+        "reviews": s["review_link_on_site"] or s["review_cta_on_site"],
+        "schema":  s["schema_quality"] > 0,
+    }
+    completeness_pct = round(
+        sum(completeness_fields.values()) / len(completeness_fields) * 100
+    )
+
+    # Recompute issues/strengths against the upgraded signals
+    auditor_for_eval = GBPAuditor(business_name=business_name)
+    issues, strengths = auditor_for_eval._evaluate(
+        s, listing_score, effective_phone, effective_address
+    )
+
+    upgraded = dict(gbp_result)
+    upgraded.update({
+        "score":            score,
+        "grade":            GBPAuditor._grade(score),
+        "found":            listing_confirmed,
+        "address":          effective_address,
+        "phone":            effective_phone,
+        "is_likely_verified": listing_confirmed and s["schema_quality"] >= 1,
+        "website_listed":   s["maps_link_url"],
+        "place_url":        s["maps_link_url"],
+        "completeness_pct": completeness_pct,
+        "nap_consistent":   s["nap_consistent"],
+        "site_phone":       s["site_phone"],
+        "schema_quality":   s["schema_quality"],
+        "maps_html_confirmed": s["maps_html_confirmed"],
+        "score_breakdown": {
+            "listing_confirmed": listing_score,
+            "nap_on_website":    phone_score + address_score,
+            "reviews_promoted":  review_score,
+            "schema_markup":     schema_score,
+            "nap_consistent":    nap_score,
+        },
+        "issues":              issues,
+        "strengths":           strengths,
+        "data_source":         (gbp_result.get("data_source") or "")
+                                + "+inner_page_rescan",
+        "pages_rescanned":     pages_scanned,
+    })
+    return upgraded
