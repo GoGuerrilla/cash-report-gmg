@@ -209,12 +209,19 @@ def _merge_website_data(channel_data: dict, website_audit: dict, base_url: str =
     hp_has_iframe      = homepage.get("has_iframe", False)
     hp_iframe_sources  = homepage.get("iframe_sources", [])
 
-    # Combine all page text for keyword detection
+    # Combine all page text for keyword detection.
+    # Per Swift Profit Systems beta feedback (2026-05-06): the prior aggregation
+    # only included title + meta_description + h1_text, so testimonials,
+    # certifications, ICP language, and media mentions living in <p>/<blockquote>
+    # bodies were invisible. Apify already captures the full rendered text per
+    # page (capped at 6000 chars in _adapt_apify_to_pages); include it so any
+    # text the rendered crawl saw can light up the keyword detectors.
     all_text = " ".join(
         " ".join([
-            p.get("title", ""),
-            p.get("meta_description", ""),
-            " ".join(p.get("h1_text", [])),
+            p.get("title", "")              or "",
+            p.get("meta_description", "")   or "",
+            " ".join(p.get("h1_text", []))  or "",
+            p.get("text", "")               or "",
         ])
         for p in pages
     ).lower()
@@ -299,17 +306,45 @@ def _merge_website_data(channel_data: dict, website_audit: dict, base_url: str =
                                       "request a quote", "book a call")
     site["has_free_trial"]    = _has("free trial", "try for free", "start free")
 
-    # Testimonials: schema markup, URL slugs, keywords, AND Apify Review schema
+    # Testimonials: schema markup, URL slugs, keywords, AND Apify Review schema.
+    # Per Swift Profit Systems beta feedback 2026-05-06: added named-attribution
+    # heuristic + broader copy patterns so quoted client outcomes attributed
+    # like "— Jane Doe, CEO Acme" get counted as social proof even when the
+    # site never uses the literal word "testimonial".
     hp_schema_lc = [s.lower() for s in homepage.get("schema_types", [])]
     _review_slugs = ("/testimonials", "/reviews", "/results", "/success-stories",
-                     "/case-studies", "/clients", "/portfolio")
+                     "/case-studies", "/clients", "/portfolio", "/wins")
     _kw_testimonials = (
         any(s in hp_schema_lc for s in ("review", "aggregaterating"))
         or any(slug in url for url in page_urls_lc for slug in _review_slugs)
         or _has("testimonial", "review", "what our clients", "what clients are saying",
                 "what our clients are saying", "client testimonials", "hear from our clients",
-                "happy clients", "client reviews", "client stories", "five star", "★", "⭐")
+                "happy clients", "client reviews", "client stories",
+                "client wins", "client results", "client outcomes",
+                "results we've delivered", "results we delivered",
+                "what people say", "what people are saying", "from our clients",
+                "see what", "in their words", "five star", "★", "⭐")
     )
+    # Named-attribution heuristic — quoted text followed by an em/en-dash and
+    # a Capitalized name. Must run against case-preserved text (not all_text,
+    # which is lowercased), so we iterate per-page text fields directly.
+    if not _kw_testimonials:
+        import re as _re
+        _attribution_re = _re.compile(
+            r"[\"“”].{15,400}?[\"“”]"                # quoted block
+            r"[^A-Za-z0-9]{0,8}"                     # whitespace/punct
+            r"[—–\-]{1,2}\s*"                        # em/en dash
+            r"[A-Z][a-z]+(?:\s+[A-Z][a-z\.]+){1,3}", # Capitalized name
+            _re.DOTALL,
+        )
+        for _p in pages:
+            _body = _p.get("text", "") or ""
+            if _body and _attribution_re.search(_body):
+                _kw_testimonials = True
+                apify_confirmed.append(
+                    "testimonials — named-attribution quote in page body"
+                )
+                break
     _apify_testimonials = _apify_has_review_schema()
     site["has_testimonials"] = _kw_testimonials or _apify_testimonials
     if _apify_testimonials and not _kw_testimonials:

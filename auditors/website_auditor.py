@@ -144,17 +144,27 @@ def _adapt_apify_to_pages(apify_result: dict) -> List[Dict]:
         images   = page.get("images", [])
         text     = page.get("text") or ""
 
-        # page_type — first page is always homepage; others inferred from slug
+        # page_type — first page is always homepage; others inferred from slug.
+        # Per Swift Profit Systems beta feedback (2026-05-06): the prior exact
+        # set match missed real-world slugs like /about-elliot, /about-team-name,
+        # or /our-process — the report would then false-flag "About page not
+        # found" even though the about page existed under a custom slug.
+        # Substring-match path segments against the slug vocabulary so any
+        # path part containing an about/service slug counts.
         if i == 0:
             page_type = "homepage"
         else:
-            path_parts = {
+            path_parts = [
                 seg.lower().rstrip("/")
                 for seg in urlparse(url).path.split("/") if seg
-            }
-            if path_parts & _ABOUT_SLUGS:
+            ]
+            if any(
+                slug in part for part in path_parts for slug in _ABOUT_SLUGS
+            ):
                 page_type = "about"
-            elif path_parts & _SERVICE_SLUGS:
+            elif any(
+                slug in part for part in path_parts for slug in _SERVICE_SLUGS
+            ):
                 page_type = "service"
             else:
                 page_type = "other"
@@ -217,7 +227,11 @@ def _adapt_apify_to_pages(apify_result: dict) -> List[Dict]:
             "images_missing_alt":      images_missing_alt,
             "internal_links":          int_links,
             "external_links":          0,
-            "cta_count":               len(ctas),
+            # CTA count includes the detected lead magnet (a lead magnet IS a
+            # CTA) so a homepage with one large lead-magnet button + a nav
+            # contact link reads as 2 CTAs, not 1. Per Swift Profit Systems
+            # beta feedback 2026-05-06.
+            "cta_count":               len(ctas) + (1 if lead_magnet_url else 0),
             "word_count":              len(text.split()),
             # Raw page text preserved for AEO LLM-eval (capped at 6000 chars
             # per page to keep audit_data dict reasonable). Unused by other

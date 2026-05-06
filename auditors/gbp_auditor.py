@@ -84,12 +84,21 @@ _REVIEW_LINK_PATTERNS = [
 ]
 _REVIEW_LINK_RE = re.compile("|".join(_REVIEW_LINK_PATTERNS), re.I)
 
-# Review CTA text patterns
+# Review CTA text patterns. Per Swift Profit Systems beta feedback 2026-05-06:
+# the prior regex only caught direct "leave a review" / "google review" copy
+# and missed real-world phrasings like "what clients say", "client wins", or
+# star markers that signal the page IS promoting reviews / social proof.
+# Widened to include the most common copy variants and unicode star markers.
 _REVIEW_CTA_RE = re.compile(
     r"(?:leave|write|post|give|submit)\s+(?:us\s+)?(?:a\s+)?review"
     r"|google\s+review"
     r"|review\s+us\s+on\s+google"
-    r"|review\s+us\s+on\s+google",
+    r"|what\s+(?:our\s+)?clients?\s+(?:are\s+)?say"
+    r"|hear\s+from\s+(?:our\s+)?clients?"
+    r"|client\s+(?:wins|results|outcomes|testimonials|stories|reviews)"
+    r"|see\s+what\s+(?:our\s+)?clients?\s+say"
+    r"|(?:five|5)\s*[-\s]?\s*star"
+    r"|★|⭐",
     re.I,
 )
 

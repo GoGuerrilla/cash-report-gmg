@@ -96,10 +96,22 @@ _BLOG_TYPES = frozenset({"BlogPosting", "Article", "NewsArticle"})
 # ── CTA keyword set ───────────────────────────────────────────────────────────
 
 _CTA_KWS = frozenset({
+    # Direct purchase / engagement
     "buy", "get started", "start", "sign up", "subscribe", "book", "schedule",
     "contact", "call us", "shop", "try", "join", "download", "get my",
     "free", "demo", "consult", "hire", "work with", "apply", "learn more",
     "request", "claim", "register",
+    # Service / advisory CTAs missed in earlier vocab — added per Swift Profit
+    # Systems beta feedback 2026-05-06 ("Find My $50K-$500K", "Take the Audit",
+    # "Discovery Call", "Profit Audit" all read as CTAs to humans but slipped
+    # the prior keyword list).
+    "audit", "guide", "tour", "explore", "discover", "find out", "find my",
+    "see how", "see if", "tell me", "yes", "i want", "next step", "next steps",
+    "talk to", "talk with", "speak with", "reach out", "ask", "i'm in",
+    "take the", "take my", "claim my", "claim your", "get the",
+    "watch", "play", "listen", "read more", "preview",
+    "estimate", "quote", "proposal", "pricing", "plans", "view plans",
+    "discovery", "strategy session", "intro call", "kick-off",
 })
 
 # ── Form type signals and precedence ─────────────────────────────────────────
