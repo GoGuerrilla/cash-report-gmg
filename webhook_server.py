@@ -1567,7 +1567,11 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
     gmg_inbox = os.environ.get("REPORT_EMAIL_TO", "gmg@goguerrilla.xyz").strip()
     gmg_attachment = pdf_path or report_attachment   # prefer full PDF; fall back if missing
     gmg_label = "PDF (full report — internal)" if pdf_path else attachment_label
-    if gmg_inbox and gmg_inbox != contact_email and gmg_attachment:
+    # Removed the != contact_email guard 2026-05-05 — when Dave audits GMG itself
+    # the client and gmg inboxes are the same address, but he still wants the
+    # full PDF in addition to the tease the client receives. Tradeoff: if the
+    # client IS the GMG inbox, they receive two emails (tease + full).
+    if gmg_inbox and gmg_attachment:
         _t = time.time()
         ok2 = send_report(
             report_path      = gmg_attachment,
