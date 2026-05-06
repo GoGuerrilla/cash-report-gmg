@@ -76,19 +76,32 @@ class BrandAuditor:
         issues, strengths = [], []
         bio = self.linktree.get("bio", "")
         stated_market = self.config.stated_target_market.lower()
+        bio_lower = bio.lower()
+
+        # Empty/missing bio — emit one clear finding and skip the
+        # downstream "does NOT mention target market" check (which renders
+        # as the misleading "Bio says: '...'" string when bio is empty).
+        # Per Dave 2026-05-06: the empty case was producing two stacked
+        # findings, one of them with literal '…' that looked like a bug.
+        if not bio:
+            issues.append(
+                "🟡 Social bio not detected on the social profile we scraped — "
+                "either the profile has no bio set, or the bio is rendered in a "
+                "format the scraper can't read (e.g., image)."
+            )
+            return {"issues": issues, "strengths": strengths, "bio_text": bio}
 
         # Check if bio mentions the stated target market
         icp_keywords = [w for w in stated_market.split() if len(w) > 3]
-        bio_lower = bio.lower()
         icp_hits = [kw for kw in icp_keywords if kw in bio_lower]
 
         if icp_hits:
             strengths.append(f"✅ Social bio references target market language: {', '.join(icp_hits)}")
-        else:
+        elif stated_market:
             issues.append(
-                f"🔴 Social bio does NOT mention stated target market "
+                f"🟡 Social bio does not mention the stated target market "
                 f"('{self.config.stated_target_market}'). "
-                f"Bio says: '{bio[:120]}...'"
+                f"Bio currently reads: \"{bio[:120].strip()}\"."
             )
 
         # Check for conflicting audience signals
@@ -110,9 +123,7 @@ class BrandAuditor:
                 f"regulated financial advisors, CPAs, and attorneys."
             )
 
-        if not bio:
-            issues.append("🔴 Social bio is empty — first touchpoint has no positioning.")
-        elif len(bio) < 50:
+        if len(bio) < 50:
             issues.append("🟡 Social bio is very short — missed opportunity to communicate value prop.")
         else:
             strengths.append("✅ Social bio has descriptive content.")

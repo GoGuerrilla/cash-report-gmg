@@ -1294,15 +1294,29 @@ class PDFReportGenerator:
         nurture = stages.get("nurture", {})
         trust   = stages.get("trust",   {})
 
+        # Resolve newsletter / referral state from BOTH intake (cfg) AND
+        # detected website signals (channel_data["website"]). Per Dave
+        # 2026-05-06: previously the table read intake-only, which let the
+        # report show "Email Newsletter: Not found" while the strengths
+        # bullet two inches away said "Newsletter active" (because the
+        # keyword scan picked up the word). Surface what the audit
+        # actually saw, with intake as the secondary source.
+        site_signals = (cfg.preloaded_channel_data or {}).get("website", {}) or {}
+        newsletter_detected = (cfg.has_active_newsletter
+                               or bool(site_signals.get("has_newsletter")))
+        referral_detected   = (cfg.has_referral_system
+                               or bool(site_signals.get("has_referral_program"))
+                               or bool(site_signals.get("has_referral")))
+
         retention_fields = "".join([
             _field("Email Newsletter",
-                   f'{_sdot("g")}Active' if cfg.has_active_newsletter
+                   f'{_sdot("g")}Active' if newsletter_detected
                    else f'<span class="td-bad">{_sdot("r")}Not found</span>'),
             _field("Email List Size",
                    f'{cfg.email_list_size:,} contacts' if cfg.email_list_size > 0
                    else f'<span class="td-bad">{_sdot("r")}None reported</span>'),
             _field("Referral System",
-                   f'{_sdot("g")}{_h(cfg.referral_system_description or "Yes")}' if cfg.has_referral_system
+                   f'{_sdot("g")}{_h(cfg.referral_system_description or "Yes")}' if referral_detected
                    else f'<span class="td-bad">{_sdot("r")}None detected</span>'),
         ])
 

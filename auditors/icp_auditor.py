@@ -243,11 +243,18 @@ class ICPAuditor:
                 else:
                     strengths.append(f"✅ On {platform}: {fit_note}.")
 
-        # LinkedIn check for B2B ICPs
+        # LinkedIn check for B2B ICPs. Per Dave 2026-05-06: don't surface a
+        # "critical gap" when we may simply have failed to find an existing
+        # profile — soften the framing and offer a single most-likely reason
+        # so the operator can self-diagnose without reading 5 duplicate
+        # LinkedIn callouts across pillars.
         if is_b2b and "LinkedIn" not in platforms:
             issues.append(
-                f"🔴 Not on LinkedIn — the highest-ROI B2B discovery channel for '{self.icp}'. "
-                f"This is a critical gap."
+                f"🟡 LinkedIn presence not detected for '{self.icp}'. "
+                f"Most likely cause: no profile is linked from your website "
+                f"footer/header (where the audit looks). If a profile exists, "
+                f"add a LinkedIn link to your homepage so AI engines and B2B "
+                f"buyers can associate it with this business."
             )
 
         # Email newsletter for any professional ICP

@@ -862,6 +862,37 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
         }
     audit_data["linktree"] = linktree_data
 
+    # ── 1a-bis. Google profile fallback ──────────────────────────
+    # Per Dave 2026-05-06: when the website footer/header doesn't link to
+    # a LinkedIn / Facebook / Instagram profile, the report has been
+    # emitting "no LinkedIn presence" findings on businesses that DO have
+    # those profiles (Swift Profit Systems' LinkedIn at /in/elliot-swift,
+    # for example). Do a single best-effort Google search for each
+    # missing primary channel; on success, populate the config so the
+    # rest of the pipeline (Apify social fallback, GBP rescan, GEO
+    # Brand Authority) treats it as a known channel. Fails silently —
+    # never penalises any score.
+    try:
+        from auditors import google_lookup
+        _t = time.time()
+        _populated = google_lookup.discover_missing_socials(
+            config.client_name or name or "",
+            config,
+            platforms=["linkedin", "facebook", "instagram"],
+        )
+        log.info("TIMING  google_profile_lookup  %.2fs  populated=%s",
+                 time.time() - _t, list(_populated.keys()))
+        # If Google surfaced new socials, fold them into linktree_data so
+        # downstream "Where Your Brand Lives" / Audience strengths reflect
+        # the Google-discovered presence.
+        for plat, url in _populated.items():
+            classified = linktree_data.setdefault("classified_links", {})
+            classified.setdefault(plat, []).append(url)
+            if plat not in linktree_data.get("platforms_found", []):
+                linktree_data.setdefault("platforms_found", []).append(plat)
+    except Exception as exc:
+        log.warning("google_profile_lookup failed silently: %s", exc)
+
     # ── 1b. LinkedIn scrape ───────────────────────────────────────
     if config.linkedin_url:
         log.info("Scraping LinkedIn: %s", config.linkedin_url)

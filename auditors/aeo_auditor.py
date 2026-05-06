@@ -311,7 +311,17 @@ class AEOAuditor:
             score += 30
             strengths.append("✅ FAQPage schema detected — top format for AI citation")
         else:
-            issues.append("🟡 No FAQPage schema — biggest single AEO lever")
+            # Per Dave 2026-05-06: emit a single FAQPage-missing finding
+            # here with the most-likely cause, and suppress the duplicates
+            # that previously echoed under GEO. Keeps the report from
+            # beating the operator over the head with one gap.
+            issues.append(
+                "🟡 No FAQPage schema detected — single biggest AEO lever. "
+                "Most likely cause: the site has no FAQ page yet, or an FAQ "
+                "page exists but lacks JSON-LD FAQPage markup. Add 5 Q&A "
+                "blocks with FAQPage schema and Google AI Overviews / "
+                "Perplexity citation eligibility increases immediately."
+            )
 
         if has_blog:
             score += 15
@@ -398,8 +408,10 @@ class AEOAuditor:
         if has_faqpage:
             score += 30
             strengths.append("✅ FAQPage schema present — top AEO ranking signal")
-        else:
-            issues.append("🔴 No FAQPage schema — single highest-leverage AEO action")
+        # NOTE: when FAQPage is missing, do NOT emit a second duplicate
+        # finding here — Question-Coverage already owns the one canonical
+        # FAQ-missing message with the most-likely-cause hypothesis. The
+        # score still reflects the absence (no +30) so the rubric is honest.
 
         if has_howto:
             score += 15

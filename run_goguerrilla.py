@@ -270,8 +270,20 @@ def _merge_website_data(channel_data: dict, website_audit: dict, base_url: str =
     if _apify_contact_form and not _kw_contact_form:
         apify_confirmed.append("contact_form — Apify saw classified contact form")
 
-    site["has_newsletter"]    = _has("newsletter", "weekly email", "biweekly",
-                                      "subscribe to our")
+    # Newsletter detection — must be specific enough not to false-positive on
+    # body text that simply mentions the word "newsletter" (e.g., a CTA to
+    # someone else's newsletter, a blog post about newsletters, etc.). Per
+    # Swift Profit Systems beta feedback 2026-05-06: the previous unanchored
+    # `_has("newsletter", ...)` over-fired once we started scanning page
+    # body text. Require either explicit subscription copy OR an Apify-
+    # detected opt-in form on the same page.
+    site["has_newsletter"]    = (
+        _has("subscribe to our newsletter", "subscribe to my newsletter",
+             "join our newsletter", "join my newsletter",
+             "weekly newsletter", "biweekly newsletter", "monthly newsletter",
+             "weekly email digest", "biweekly email")
+        or _apify_has_form_type("optin")
+    )
     # Blog: URL slug + keyword + Apify blog_posts list (positive evidence)
     _blog_slugs = ("/blog", "/articles", "/news", "/posts", "/marketing-insights",
                    "/insights", "/resources", "/content")

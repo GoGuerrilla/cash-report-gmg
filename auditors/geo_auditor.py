@@ -548,8 +548,8 @@ class GEOAuditor:
         if op.get("has_faq_schema"):
             score = min(score + 8, 100)
             strengths.append("✅ FAQPage schema detected — directly boosts Google AI Overview eligibility")
-        else:
-            issues.append("🟡 No FAQPage schema — add FAQ schema to boost AI Overview inclusion probability")
+        # else: no duplicate emission — AEO auditor owns the single
+        # FAQPage-missing finding with hypothesis (per Dave 2026-05-06).
 
         # ── Word count ─────────────────────────────────────────
         wc = op.get("word_count", 0)
@@ -793,7 +793,11 @@ class GEOAuditor:
             issues.append("🟡 LinkedIn follower count unknown")
         else:
             li_score = 0
-            issues.append("🔴 No LinkedIn presence — primary B2B discovery channel")
+            # Per Dave 2026-05-06: don't echo a "no LinkedIn" finding here —
+            # the social auditor already owns this with a softer framing and
+            # a most-likely cause. Repeating it under GEO inflates the
+            # impression of a single gap into 4-5 separate "critical"
+            # callouts across the report.
 
         gbp_score = 15   # neutral — not verifiable without Places API here
         score = max(20, min(90, channel_score + li_score + gbp_score))

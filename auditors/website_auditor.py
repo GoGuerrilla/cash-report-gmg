@@ -58,11 +58,17 @@ _ABOUT_SLUGS = frozenset({
     "team", "our-team", "company", "mission",
 })
 
-# Keywords used to identify a Services / Offerings page
+# Keywords used to identify a Services / Offerings page. Per Swift Profit
+# Systems beta feedback 2026-05-06: real sites use custom service-page slugs
+# (e.g. /assess, /educate, /pca, /audit, /process, /how-it-works) that the
+# prior tight vocab missed. Substring-matched in _adapt_apify_to_pages.
 _SERVICE_SLUGS = frozenset({
     "services", "service", "solutions", "solution",
-    "what-we-do", "offerings", "offering", "products",
-    "work", "packages", "pricing",
+    "what-we-do", "offerings", "offering", "products", "product",
+    "work", "packages", "package", "pricing", "plans", "plan",
+    "audit", "assess", "assessment", "educate", "diagnose", "diagnostic",
+    "process", "how-it-works", "approach", "method", "methodology",
+    "engagement", "engagements",
 })
 
 
@@ -167,7 +173,20 @@ def _adapt_apify_to_pages(apify_result: dict) -> List[Dict]:
             ):
                 page_type = "service"
             else:
-                page_type = "other"
+                # Schema.org fallback — when slugs miss, a Service /
+                # ProfessionalService / Offer schema entry is strong
+                # evidence the page describes an offering. Per Dave
+                # 2026-05-06: Wix sites often use marketing slugs the
+                # vocab can't anticipate but consistently emit Service
+                # schema via Wix's built-in structured data.
+                _stype_lc = " ".join(
+                    str(obj.get("@type", "")).lower() for obj in struct
+                )
+                if any(t in _stype_lc for t in
+                       ("service", "professionalservice", "offer", "product")):
+                    page_type = "service"
+                else:
+                    page_type = "other"
 
         schema_types = [obj.get("@type", "") for obj in struct if obj.get("@type")]
 

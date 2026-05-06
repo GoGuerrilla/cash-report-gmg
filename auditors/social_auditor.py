@@ -147,7 +147,13 @@ class SocialMediaAuditor:
         elif n > 6:
             issues.append("🟡 Active on many platforms — risk of spreading team too thin")
 
-        # Flag missing primary platforms as critical for this industry
+        # Flag missing primary platforms. Per Dave 2026-05-06: previously
+        # emitted as 🔴 CRITICAL without explanation; the same finding then
+        # echoed across ICP, GEO, and AEO pillars, making the report read
+        # like the operator was being beaten over the head with one gap.
+        # Soften to 🟡 with a single most-likely reason so the operator
+        # can self-diagnose, and let downstream pillars defer to this
+        # source of truth instead of re-emitting their own version.
         for p in primary:
             platform_configured = {
                 "LinkedIn":  self.config.linkedin_url,
@@ -159,8 +165,11 @@ class SocialMediaAuditor:
             }.get(p, "")
             if not platform_configured:
                 issues.append(
-                    f"🔴 CRITICAL: Not on {p} — the primary discovery channel for "
-                    f"{industry} businesses. This is a significant gap."
+                    f"🟡 {p} presence not detected — primary discovery "
+                    f"channel for {industry} businesses. Most likely cause: "
+                    f"no profile is linked from your website footer/header "
+                    f"(where the audit looks). If a profile exists, link it "
+                    f"from the homepage so AI engines and buyers can find it."
                 )
 
         # Warn about high-weight platforms not in use
