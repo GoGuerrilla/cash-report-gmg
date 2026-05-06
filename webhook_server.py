@@ -1558,20 +1558,29 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
                 name, contact_email, attachment_label, report_attachment,
             )
 
-    # 2. Always send a copy to the GMG team inbox
-    gmg_inbox = os.environ.get("REPORT_EMAIL_TO", "")
-    if gmg_inbox and gmg_inbox != contact_email:
+    # 2. Always send a copy to the GMG team inbox.
+    # Per Dave 2026-05-05: GMG inbox should ALWAYS receive the FULL PDF
+    # regardless of whether the client got the tease (form path) or the full
+    # PDF (admin path). Drive integration was abandoned in favour of inbox-
+    # delivered full reports. The local-Mac save flow is: GMG inbox → manual
+    # save to a folder.
+    gmg_inbox = os.environ.get("REPORT_EMAIL_TO", "gmg@goguerrilla.xyz").strip()
+    gmg_attachment = pdf_path or report_attachment   # prefer full PDF; fall back if missing
+    gmg_label = "PDF (full report — internal)" if pdf_path else attachment_label
+    if gmg_inbox and gmg_inbox != contact_email and gmg_attachment:
         _t = time.time()
         ok2 = send_report(
-            report_path      = report_attachment,
+            report_path      = gmg_attachment,
             client_name      = name,
             overall_score    = overall_score,
             overall_grade    = overall_grade,
             to_addr          = gmg_inbox,
-            attachment_label = attachment_label,
+            attachment_label = gmg_label,
         )
-        log.info("TIMING  sendgrid_gmg_send       %.2fs  result=%s",
-                 time.time() - _t, "SUCCESS" if ok2 else "FAILED")
+        log.info(
+            "TIMING  sendgrid_gmg_send       %.2fs  result=%s  attachment=%s",
+            time.time() - _t, "SUCCESS" if ok2 else "FAILED", gmg_label,
+        )
         if not ok2:
             log.error(
                 "GMG TEAM EMAIL FAILED — team copy for client %r not delivered to %s.",
