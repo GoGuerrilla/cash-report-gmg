@@ -395,7 +395,17 @@ def _merge_website_data(channel_data: dict, website_audit: dict, base_url: str =
     # second-pass crawl") and avoid hard-claiming absence when only the
     # keyword scan said no.
     site["apify_confirmed"]    = apify_confirmed
-    site["apify_has_faqpage"]  = _apify_has_faqpage_schema()
+    # FAQPage detection — accept a hit from EITHER the Apify cross-page
+    # schema sweep OR the homepage's own schema_types. Per Dave 2026-05-06:
+    # AEO Question Coverage was checking only the Apify flag while AEO
+    # Structured Data checked both, producing a contradictory pair of
+    # findings ("FAQPage detected" + "No FAQPage detected") in the same PDF.
+    # Honest single source of truth.
+    _hp_schema_lc = [s.lower() for s in homepage.get("schema_types", []) or []]
+    site["apify_has_faqpage"]  = (
+        _apify_has_faqpage_schema()
+        or "faqpage" in _hp_schema_lc
+    )
     # Log every Apify-enabled audit so we can confirm Push 4 is firing in prod.
     # Detect "Apify ran" via presence of the apify_blog_posts key (set in
     # website_auditor when USE_APIFY_CONTENT=1) OR any apify_* signals.

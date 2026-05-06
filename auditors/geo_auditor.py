@@ -736,12 +736,24 @@ class GEOAuditor:
         if signals.get("testimonials"):
             strengths.append("✅ Client testimonials present — trust signal for AI systems")
         else:
-            issues.append("🔴 No testimonials — AI systems discount unverified expertise claims")
+            # Per Dave 2026-05-06: testimonials may live in image quotes /
+            # widgets we can't parse. Don't claim "no testimonials" when we
+            # can't confirm absence.
+            issues.append(
+                "🟡 Testimonials not detected in crawled content — may exist "
+                "as image quotes or third-party review widgets the crawler "
+                "couldn't read. Surface 1-3 as plain text on the homepage so "
+                "AI systems can pick them up as expertise signals."
+            )
 
         if signals.get("case_studies"):
             strengths.append("✅ Case studies present — AI systems prefer demonstrated results")
         else:
-            issues.append("🟡 No case studies — add 1–2 outcome-focused client stories")
+            issues.append(
+                "🟡 Case studies not detected — add 1-2 outcome-focused "
+                "client stories (or surface existing ones if they live in "
+                "image, PDF, or external CMS form)."
+            )
 
         if signals.get("certifications"):
             strengths.append("✅ Credentials / certifications visible")

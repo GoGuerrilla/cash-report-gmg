@@ -559,6 +559,7 @@ class PDFReportGenerator:
                 self._page_aeo(),
                 self._page_gbp_competitive(),
                 self._page_action_plan(),
+                self._page_data_coverage(),
                 self._page_cta(),
             ])
         return (f'<!DOCTYPE html><html><head><meta charset="UTF-8">'
@@ -1844,6 +1845,120 @@ class PDFReportGenerator:
         )
         return _pg(11, body, self.date_str, self.logo_src)
 
+    # ── PAGE 12: Data Coverage — what we could/couldn't verify ───────────────
+
+    def _page_data_coverage(self) -> str:
+        """
+        Transparency page: lists exactly what the audit was able to verify
+        and what it couldn't reach. Per Dave 2026-05-06: when the report
+        flags a missing trust signal we couldn't actually scan for, the
+        operator deserves to see at a glance which findings are
+        verified-absent vs not-detected-may-exist. This is the "schema
+        mapping" page Dave requested — a single artifact that frames the
+        rest of the report's findings.
+        """
+        site_signals = (self.config.preloaded_channel_data or {}).get("website", {}) or {}
+        web   = self.data.get("website", {}) or {}
+        gbp   = self.data.get("gbp", {})    or {}
+
+        pages_n   = int(web.get("pages_crawled", 0) or 0)
+        blog_n    = len(web.get("apify_blog_posts", []) or [])
+        platform  = (web.get("platform") or "Unknown").title()
+        crawler   = "Apify rendered (Playwright + full JS)" if (
+            web.get("data_source") == "apify_content_crawler"
+            or web.get("apify_blog_posts") is not None
+        ) else "Static HTML fetch"
+
+        schema_types_set: set = set()
+        for p in (web.get("pages", []) or []):
+            for t in (p.get("schema_types", []) or []):
+                if t:
+                    schema_types_set.add(str(t))
+        schema_str = ", ".join(sorted(schema_types_set)) or "none detected"
+
+        gbp_source_label = {
+            "google_places_api":         "Google Places API (verified)",
+            "website_scrape_maps_html":  "Website signals + Maps HTML lookup",
+            "website_scrape_maps_html+inner_page_rescan":
+                                         "Website signals + Maps lookup + inner-page rescan",
+            "not_available":             "Not available",
+        }.get(gbp.get("data_source", ""), gbp.get("data_source", "—"))
+
+        # Per-signal verification row helper
+        def _row(label: str, value: bool, note_when_missing: str) -> str:
+            if value:
+                return (
+                    f'<tr><td class="td-name">{_h(label)}</td>'
+                    f'<td>{_sdot("g")}{_sbadge("ok", "Verified")}</td>'
+                    f'<td style="font-size:11px;color:rgba(255,255,255,.6)">'
+                    f'Found in crawled content.</td></tr>'
+                )
+            return (
+                f'<tr><td class="td-name">{_h(label)}</td>'
+                f'<td>{_sdot("y")}{_sbadge("warn", "Not detected")}</td>'
+                f'<td style="font-size:11px;color:rgba(255,255,255,.6)">'
+                f'{_h(note_when_missing)}</td></tr>'
+            )
+
+        signal_note = (
+            "may live in image quotes, third-party review widgets, or "
+            "JS-rendered components our crawler can't parse"
+        )
+
+        signals_rows = "".join([
+            _row("Testimonials",        bool(site_signals.get("has_testimonials")),
+                 f"Plain-text testimonials not found — {signal_note}."),
+            _row("Case studies",        bool(site_signals.get("has_case_studies")),
+                 "No case-study URL or schema detected — may exist as PDFs or external links."),
+            _row("Certifications",      bool(site_signals.get("has_certifications")),
+                 "Often live as image badges; add alt-text to register as text."),
+            _row("Media mentions",      bool(site_signals.get("has_media_mentions")),
+                 "No 'as seen in' / 'featured in' copy detected; press logos may be image-only."),
+            _row("Client logos",        bool(site_signals.get("has_client_logos")),
+                 "No 'our clients' / 'trusted by' copy detected; logos may be image-only."),
+            _row("FAQPage schema",      bool(site_signals.get("apify_has_faqpage")),
+                 "No FAQPage JSON-LD detected on any crawled page."),
+            _row("Email newsletter",    bool(site_signals.get("has_newsletter")
+                                              or self.config.has_active_newsletter),
+                 "No 'subscribe to newsletter' copy or opt-in form detected."),
+            _row("LinkedIn profile",    bool(self.config.linkedin_url),
+                 "Not linked from website footer/header; Google profile lookup also returned no result."),
+            _row("Google Business Profile",
+                 gbp.get("data_source") == "google_places_api"
+                 or bool(gbp.get("place_url")),
+                 "Listing not confirmed via Maps search; verified GBP API not in use."),
+        ])
+
+        body = (
+            f'<div class="page-title"><span>What We</span> Could Verify</div>'
+            f'<div class="text-body" style="margin-bottom:14px">'
+            f'This page lists every audit signal and whether the crawler could '
+            f'verify it. <b>🟡 Not detected</b> means the signal didn\'t appear '
+            f'in the public content we could read — it may genuinely be missing, '
+            f'or it may exist in a format our crawler couldn\'t parse '
+            f'(image-embedded text, third-party widgets, JS-hydrated components). '
+            f'Treat 🟡 items as flags to review manually, not as confirmed gaps.'
+            f'</div>'
+            f'{_sub("Crawl Coverage")}'
+            f'<table class="field-table"><tbody>'
+            f'{_field("Pages crawled", _h(str(pages_n) + " (homepage + inner pages)"))}'
+            f'{_field("Blog posts crawled", _h(str(blog_n)))}'
+            f'{_field("Platform detected", _h(platform))}'
+            f'{_field("Crawler", _h(crawler))}'
+            f'{_field("Schema types found", _h(schema_str))}'
+            f'{_field("GBP data source", _h(gbp_source_label))}'
+            f'</tbody></table>'
+            f'{_sub("Signal-by-Signal Verification")}'
+            f'<table class="data-table">'
+            f'<thead><tr><th>Signal</th><th>Status</th><th>Notes</th></tr></thead>'
+            f'<tbody>{signals_rows}</tbody></table>'
+            f'<div class="text-body" style="font-size:11px;color:rgba(255,255,255,.5);margin-top:12px">'
+            f'Generated {_h(self.date_str)} · Coverage page is informational; '
+            f'scoring uses verified signals only.'
+            f'</div>'
+        )
+        return _pg(12, body, self.date_str, self.logo_src)
+
     # ─────────────────────────────────────────────────────────────────────────
     # SMART TEASE pages (Add-On 2) — 3-4 page condensed report. Reuses CSS,
     # cover, and CTA from the full report; adds two condensed pages between.
@@ -2223,6 +2338,7 @@ class PDFReportGenerator:
             f'Book at <strong>www.gogmg.net/meeting</strong> · Report by C.A.S.H. Report by GMG · Confidential</div>'
             f'</div>'
         )
-        # CTA is page 5 in the 5-page tease, page 12 in the full report.
-        page_num = 5 if getattr(self, "tease_mode", False) else 12
+        # CTA is page 5 in the 5-page tease, page 13 in the full report
+        # (bumped from 12 when Data Coverage page was added 2026-05-06).
+        page_num = 5 if getattr(self, "tease_mode", False) else 13
         return _pg(page_num, body, self.date_str, self.logo_src)

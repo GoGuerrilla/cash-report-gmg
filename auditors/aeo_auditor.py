@@ -530,14 +530,27 @@ class AEOAuditor:
         score = tiers.get(present_count, 95)
 
         issues, strengths = [], []
+        # Per Dave 2026-05-06: trust signals can live in image embeds,
+        # third-party widgets, or JS-rendered components our crawler can't
+        # parse. Don't fire 🔴 CRITICAL on absence we can't verify — soften
+        # severity and frame as "not detected" so the operator knows whether
+        # to add the signal or just surface an existing one.
         if signals["testimonials"]:
             strengths.append("✅ Testimonials present — direct trust signal for AI citation")
         else:
-            issues.append("🔴 No testimonials — AI systems discount unverified expertise claims")
+            issues.append(
+                "🟡 Testimonials not detected in crawled content — may live "
+                "in image quotes or third-party review widgets we can't parse. "
+                "Surface as plain text on homepage to register with AI engines."
+            )
         if signals["case_studies"]:
             strengths.append("✅ Case studies present — outcome-focused content boosts AI trust")
         else:
-            issues.append("🟡 No case studies — add 1-2 outcome stories for AEO depth")
+            issues.append(
+                "🟡 Case studies not detected — add 1-2 outcome stories as "
+                "plain-text pages for AEO depth (or surface existing ones if "
+                "they live in image / PDF / external CMS form)."
+            )
         if signals["certifications"]:
             strengths.append("✅ Certifications visible — credentials reinforce authority")
         if signals["media_mentions"]:

@@ -241,9 +241,19 @@ class FunnelAuditor:
         if has_testimonials:
             strengths.append("✅ Testimonials present on website.")
         else:
+            # Per Dave 2026-05-06: testimonials may exist but live in widgets,
+            # images, or JS components our crawler can't parse. Don't label
+            # this CRITICAL when we can't confirm absence — soften severity
+            # and add the most-likely-cause framing so the operator knows
+            # whether to add testimonials or just surface existing ones.
             issues.append(
-                "🔴 No testimonials visible. B2B and high-consideration buyers rely heavily on "
-                "peer proof before engaging a vendor — this is a critical trust gap."
+                "🟡 Testimonials not detected in the public content we crawled. "
+                "They may exist in a format our crawler couldn't parse — "
+                "image-embedded quotes, third-party review widgets (Google "
+                "Reviews iframe, Trustpilot), or dynamically-loaded JS "
+                "components. If you have testimonials, surface 1-3 of them as "
+                "plain text on the homepage with named attribution so AI "
+                "engines and human visitors can see them."
             )
 
         if has_referral:
@@ -251,9 +261,10 @@ class FunnelAuditor:
             strengths.append(f"✅ Referral system in place{ref_note}.")
         else:
             issues.append(
-                "🔴 No referral system detected. For most service businesses, "
-                "referrals are the #1 client acquisition channel. "
-                "A structured referral program is high-ROI and low-cost."
+                "🟡 Referral program not detected on website. May exist as a "
+                "private signup flow or be communicated 1:1 with clients. If "
+                "you have one, surface a public mention or signup CTA on the "
+                "homepage to maximise referral velocity."
             )
 
         if client_count > 10:
@@ -270,8 +281,11 @@ class FunnelAuditor:
             strengths.append("✅ Marketing certifications/credentials displayed.")
         else:
             issues.append(
-                "🟡 No certifications displayed. Industry credentials, partner badges, "
-                "or category-relevant accreditations build trust — surface any you hold."
+                "🟡 Certifications/credentials not detected in the public "
+                "content we crawled. Often live as image badges or footer "
+                "logos that the crawler can't read as text. If you hold "
+                "industry credentials or partner badges, add an alt-text "
+                "label or plain-text mention so they register as trust signals."
             )
 
         if has_client_logos:

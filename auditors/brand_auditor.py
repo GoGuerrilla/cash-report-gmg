@@ -282,13 +282,20 @@ class BrandAuditor:
         else:
             strengths.append(f"✅ Value proposition defined: '{value_prop[:80]}'")
 
-        # Social proof
+        # Social proof — per Dave 2026-05-06: don't label CRITICAL when we
+        # can't verify absence. User content (testimonials, case studies)
+        # often lives in widgets, image quotes, or third-party iframes
+        # the crawler can't parse.
         has_testimonials = preloaded.get("website", {}).get("has_testimonials", False)
         has_case_studies = preloaded.get("website", {}).get("has_case_studies", False)
         if not has_testimonials and not has_case_studies:
             issues.append(
-                "🔴 No testimonials or case studies visible in public content. "
-                "B2B and high-consideration buyers require strong social proof before engaging a vendor."
+                "🟡 Testimonials or case studies not detected in the public "
+                "content we crawled. They may exist in a format we can't parse "
+                "(image quotes, third-party review widgets, JS-hydrated "
+                "components). If you have either, surface 1-3 as plain text "
+                "on the homepage with named attribution — it's the strongest "
+                "B2B trust signal we can detect."
             )
 
         return {"issues": issues, "strengths": strengths}
