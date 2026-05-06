@@ -1538,11 +1538,22 @@ class PDFReportGenerator:
         gbp_address  = _h(gbp.get("address") or "—")
         gbp_phone    = _h(str(gbp.get("phone") or "—"))
         _gbp_rc      = gbp.get("review_count", 0) or 0
-        gbp_reviews  = (f"~{_gbp_rc} (estimated)"
-                        if _gbp_rc and not gbp.get("review_count_verified", True)
-                        else str(_gbp_rc) if _gbp_rc else "0")
+        # Per beta feedback (Swift Profit Systems 2026-05-05): never present
+        # estimated review counts as findings — they're regex-scraped from
+        # Google Maps HTML and frequently match unrelated numbers. Show
+        # 'Unverified' instead. Real counts (Places API path) still display.
+        if _gbp_rc and gbp.get("review_count_verified", True):
+            gbp_reviews = str(_gbp_rc)
+        elif _gbp_rc:
+            gbp_reviews = "Unverified"
+        else:
+            gbp_reviews = "—"
         gbp_hrs      = gbp.get("hours_listed", False)
-        gbp_verified = gbp.get("is_likely_verified", gbp.get("found", False))
+        # 'Verified' label is misleading without paid Google API confirmation —
+        # we only know the listing was found in Maps search, not that the
+        # owner has claimed/verified it. Per beta feedback, show 'Listing
+        # Found' (less assertive) instead of 'Yes'/'Unconfirmed'.
+        gbp_listing_found = gbp.get("is_likely_verified", gbp.get("found", False))
         gbp_nap      = gbp.get("nap_consistent", False)
         gbp_complete = gbp.get("completeness_pct", 0) or 0
 
@@ -1559,9 +1570,10 @@ class PDFReportGenerator:
             f'<div class="gbp-field"><div class="gbp-field-label">Hours Visible</div>'
             f'<div class="gbp-field-value {"td-good" if gbp_hrs else "td-bad"}">'
             f'{_sdot("g") if gbp_hrs else _sdot("r")}{"Yes" if gbp_hrs else "No"}</div></div>'
-            f'<div class="gbp-field"><div class="gbp-field-label">Verified</div>'
-            f'<div class="gbp-field-value {"td-good" if gbp_verified else "td-warn"}">'
-            f'{_sdot("g") if gbp_verified else _sdot("y")}{"Yes" if gbp_verified else "Unconfirmed"}</div></div>'
+            f'<div class="gbp-field"><div class="gbp-field-label">Listing Found</div>'
+            f'<div class="gbp-field-value {"td-good" if gbp_listing_found else "td-warn"}">'
+            f'{_sdot("g") if gbp_listing_found else _sdot("y")}'
+            f'{"Yes — name appears in Maps" if gbp_listing_found else "Not found — GBP not claimed"}</div></div>'
             f'<div class="gbp-field"><div class="gbp-field-label">NAP Consistent</div>'
             f'<div class="gbp-field-value {"td-good" if gbp_nap else "td-warn"}">'
             f'{_sdot("g") if gbp_nap else _sdot("y")}{"Yes" if gbp_nap else "Check needed"}</div></div>'

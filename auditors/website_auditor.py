@@ -66,6 +66,63 @@ _SERVICE_SLUGS = frozenset({
 })
 
 
+def _fetch_sitemap_urls(base_url: str, max_urls: int = 30) -> List[str]:
+    """
+    Best-effort sitemap.xml fetch + URL extraction. Tries common sitemap paths,
+    parses <loc> entries, deduplicates, and caps at max_urls so apify_content's
+    startUrls list stays bounded.
+
+    Added 2026-05-05 per Swift Profit Systems beta feedback: the prior crawl
+    only used hard-coded _PRIORITY_GROUPS slugs and missed sites with custom
+    paths like /about-elliot, /educate, /pca. Sitemap is the canonical source
+    of truth for what URLs the site declares.
+
+    Returns [] on any failure — apify_content falls back to its priority-group
+    discovery when the list is empty.
+    """
+    if not REQUESTS_OK or not base_url:
+        return []
+    base = base_url.rstrip("/")
+    candidates = [
+        f"{base}/sitemap.xml",
+        f"{base}/sitemap_index.xml",
+        f"{base}/sitemap.xml.gz",
+    ]
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; CASHReportBot/1.0)"}
+    for url in candidates:
+        try:
+            r = requests.get(url, headers=headers, timeout=8, allow_redirects=True)
+            if r.status_code != 200 or not r.text:
+                continue
+            # Extract <loc> entries — works for both single sitemaps and
+            # sitemap-index files (which list child sitemaps but the same regex
+            # picks up the URLs either way).
+            locs = re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", r.text, re.IGNORECASE)
+            # Filter to URLs on the same domain — avoid following sitemap-index
+            # references to external CDN / staging hosts.
+            domain = urlparse(base).netloc
+            same_domain = [u for u in locs if urlparse(u).netloc == domain]
+            # Dedupe + cap. Skip the homepage itself since apify_content always
+            # adds it as the first start URL.
+            seen = set()
+            urls: List[str] = []
+            for u in same_domain:
+                u_norm = u.rstrip("/")
+                if u_norm == base:
+                    continue
+                if u_norm in seen:
+                    continue
+                seen.add(u_norm)
+                urls.append(u)
+                if len(urls) >= max_urls:
+                    break
+            if urls:
+                return urls
+        except Exception:
+            continue
+    return []
+
+
 def _adapt_apify_to_pages(apify_result: dict) -> List[Dict]:
     """Convert apify_content.fetch() output to the per-page dict shape that
     _analyze_page() produces, so all downstream consumers work unchanged."""
@@ -223,7 +280,15 @@ class WebsiteAuditor:
         # ── Step 1: Crawl target pages ───────────────────────
         if os.environ.get("USE_APIFY_CONTENT", "").strip() == "1":
             from auditors import apify_content
-            apify_result  = apify_content.fetch(self.base_url)
+            # Parse sitemap.xml to feed all declared URLs into the Apify start
+            # set. Without this, the actor only crawls the homepage + the
+            # _PRIORITY_GROUPS hard-coded path patterns, which miss sites with
+            # custom slugs like /about-elliot, /educate, /pca (Swift Profit
+            # Systems beta feedback 2026-05-05).
+            sitemap_urls = _fetch_sitemap_urls(self.base_url)
+            if sitemap_urls:
+                log.info("Sitemap fetch: %d URLs found for %s", len(sitemap_urls), self.base_url)
+            apify_result  = apify_content.fetch(self.base_url, sitemap_urls=sitemap_urls)
             self.platform = (apify_result.get("platform_hints") or ["unknown"])[0]
             pages_data    = _adapt_apify_to_pages(apify_result)
             # Push 4 sanity check — preserve blog_posts (with published dates)

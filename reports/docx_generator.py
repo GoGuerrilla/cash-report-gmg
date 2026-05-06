@@ -1082,18 +1082,31 @@ class DocxReportGenerator:
         if gbp.get("found"):
             self._subsection(doc, "Google Business Profile  (Live — Google Places API)")
             rating_str = f"{gbp['rating']}/5" if gbp.get("rating") else "No rating"
+            # Per beta feedback (Swift Profit Systems 2026-05-05): never present
+            # estimated review counts as findings — they're regex-scraped and
+            # frequently match unrelated numbers. 'Verified' label is misleading
+            # without paid Google API; replaced with 'Listing Found' which
+            # accurately states what we know.
+            _gbp_rc = gbp.get("review_count") or 0
+            if _gbp_rc and gbp.get("review_count_verified", True):
+                reviews_str = str(_gbp_rc)
+            elif _gbp_rc:
+                reviews_str = "Unverified"
+            else:
+                reviews_str = "—"
+            listing_found = gbp.get("is_likely_verified", gbp.get("found", False))
+            listing_str = ("✅ Yes — name appears in Maps" if listing_found
+                           else "⚠️ Not found — GBP not claimed")
             rows = [
                 ("Business Name",      gbp.get("business_name", "—")),
                 ("Address",            gbp.get("address", "—")),
                 ("Phone",              gbp.get("phone") or "—"),
                 ("Rating",             rating_str),
-                ("Total Reviews",      (f"~{gbp['review_count']} (estimated)"
-                                       if gbp.get("review_count") and not gbp.get("review_count_verified", True)
-                                       else str(gbp.get("review_count", 0)))),
+                ("Total Reviews",      reviews_str),
                 ("Photos on Profile",  str(gbp.get("photo_count", 0))),
                 ("Hours Listed",       "✅ Yes" if gbp.get("hours_listed") else "❌ No"),
                 ("Profile Status",     gbp.get("business_status", "—")),
-                ("Appears Verified",   "✅ Yes" if gbp.get("is_likely_verified") else "⚠️ Uncertain"),
+                ("Listing Found",      listing_str),
                 ("GBP Posts",          "Cannot verify via Places API"),
                 ("Profile Complete",   f"{gbp.get('completeness_pct', 0)}%"),
                 ("GBP Score",          f"{gbp.get('score', 50)}/100  ({gbp.get('grade', 'C')})"),
