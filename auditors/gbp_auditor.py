@@ -311,17 +311,50 @@ class GBPAuditor:
         Extracts business name confirmation, rating, and review count
         from the embedded JavaScript data if present.
         Fails silently — never penalises score.
+
+        Per Dave 2026-05-07 (GMG smoke test): a bare business name
+        (e.g. "GMG") is too short to be uniquely identifiable in a
+        Maps search — Google returns random unrelated listings and
+        our regex never finds a match. Combine the business name
+        with the website domain (e.g. "GMG goguerrilla.xyz") which
+        is unique enough to disambiguate even short abbreviations.
+        Falls back to name-only if the website-qualified search
+        returns nothing.
         """
         if not self.name:
             return
-        query = urllib.parse.quote_plus(self.name)
-        url   = f"https://www.google.com/maps/search/{query}"
-        try:
-            r = requests.get(url, headers=_HEADERS, timeout=12)
-            if r.status_code != 200:
-                return
-            html = r.text
 
+        # Build the query candidates in fall-back order. Most specific
+        # (name + domain) first; bare-name second only if the qualified
+        # search returned no html / non-200.
+        query_candidates: List[str] = []
+        domain = _domain(self.website) if self.website else ""
+        if domain:
+            query_candidates.append(f"{self.name} {domain}")
+        query_candidates.append(self.name)
+
+        html = ""
+        used_query = ""
+        for cand in query_candidates:
+            try:
+                q = urllib.parse.quote_plus(cand)
+                r = requests.get(
+                    f"https://www.google.com/maps/search/{q}",
+                    headers=_HEADERS, timeout=12,
+                )
+                if r.status_code == 200 and r.text:
+                    html = r.text
+                    used_query = cand
+                    # Stop on the first successful response — even if it
+                    # doesn't end up confirming the listing, we don't want
+                    # to ping Google twice and risk a CAPTCHA on retry.
+                    break
+            except Exception:
+                continue
+        if not html:
+            return
+
+        try:
             # Confirm business name appears in response
             if self.name.lower() in html.lower():
                 signals["maps_html_confirmed"] = True

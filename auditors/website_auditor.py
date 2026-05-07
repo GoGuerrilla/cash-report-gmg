@@ -95,37 +95,70 @@ def _fetch_sitemap_urls(base_url: str, max_urls: int = 30) -> List[str]:
         f"{base}/sitemap.xml.gz",
     ]
     headers = {"User-Agent": "Mozilla/5.0 (compatible; CASHReportBot/1.0)"}
-    for url in candidates:
+    domain = urlparse(base).netloc
+
+    def _fetch_xml(xml_url: str) -> str:
+        """Fetch a sitemap URL and return the body, or '' on any failure."""
         try:
-            r = requests.get(url, headers=headers, timeout=8, allow_redirects=True)
-            if r.status_code != 200 or not r.text:
-                continue
-            # Extract <loc> entries — works for both single sitemaps and
-            # sitemap-index files (which list child sitemaps but the same regex
-            # picks up the URLs either way).
-            locs = re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", r.text, re.IGNORECASE)
-            # Filter to URLs on the same domain — avoid following sitemap-index
-            # references to external CDN / staging hosts.
-            domain = urlparse(base).netloc
-            same_domain = [u for u in locs if urlparse(u).netloc == domain]
-            # Dedupe + cap. Skip the homepage itself since apify_content always
-            # adds it as the first start URL.
-            seen = set()
-            urls: List[str] = []
-            for u in same_domain:
-                u_norm = u.rstrip("/")
-                if u_norm == base:
-                    continue
-                if u_norm in seen:
-                    continue
-                seen.add(u_norm)
-                urls.append(u)
-                if len(urls) >= max_urls:
-                    break
-            if urls:
-                return urls
+            r = requests.get(xml_url, headers=headers, timeout=8, allow_redirects=True)
+            if r.status_code == 200 and r.text:
+                return r.text
         except Exception:
+            pass
+        return ""
+
+    def _extract_locs(xml_body: str) -> List[str]:
+        """Pull all <loc>…</loc> entries from a sitemap body."""
+        return re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", xml_body, re.IGNORECASE)
+
+    for url in candidates:
+        body = _fetch_xml(url)
+        if not body:
             continue
+
+        # Sitemap-index detection. Per Dave 2026-05-07 (GMG smoke test):
+        # Wix / Squarespace / Webflow root sitemaps are typically
+        # <sitemapindex> documents pointing at sub-sitemaps. The previous
+        # regex grabbed those sub-sitemap *.xml URLs and fed them to Apify
+        # as content pages — Apify wasted Playwright budget trying to
+        # render XML as HTML, and the actual content URLs (inside the
+        # sub-sitemaps) were never reached. Detect the index format and
+        # recurse one level so we extract real page URLs.
+        is_index = "<sitemapindex" in body.lower()
+        if is_index:
+            sub_urls = _extract_locs(body)
+            # Only follow sub-sitemaps on the same domain; skip CDN/staging.
+            sub_urls = [u for u in sub_urls if urlparse(u).netloc == domain]
+            page_locs: List[str] = []
+            for sub in sub_urls:
+                sub_body = _fetch_xml(sub)
+                if sub_body:
+                    page_locs.extend(_extract_locs(sub_body))
+        else:
+            page_locs = _extract_locs(body)
+
+        # Filter: same domain, drop any leftover *.xml entries (belt-and-
+        # suspenders against malformed mixed-content sitemaps), dedupe,
+        # cap at max_urls.
+        same_domain = [
+            u for u in page_locs
+            if urlparse(u).netloc == domain
+            and not u.lower().rstrip("/").endswith(".xml")
+        ]
+        seen = set()
+        urls: List[str] = []
+        for u in same_domain:
+            u_norm = u.rstrip("/")
+            if u_norm == base:
+                continue
+            if u_norm in seen:
+                continue
+            seen.add(u_norm)
+            urls.append(u)
+            if len(urls) >= max_urls:
+                break
+        if urls:
+            return urls
     return []
 
 
