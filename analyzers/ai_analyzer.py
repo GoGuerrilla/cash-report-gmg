@@ -884,7 +884,15 @@ Respond with ONLY this exact JSON (no markdown fences, no extra keys):
         # Other channels: binary presence + small confirmed-activity bonus (cap 40).
         # Total social capped at 80 — same ceiling as old formula.
         #
-        # Data sources (both are populated before Phase 4 runs):
+        # Per Dave 2026-05-07 (chunks 2/3 Issue 3): only score channels we
+        # actually asked about in intake OR detected via scraper. A channel
+        # that was never in the intake AND not surfaced by Apify / Google
+        # lookup is OUT OF SCOPE — it cannot drag the score down. The
+        # final score is renormalized against the per-client max so the
+        # 0-80 scale stays interpretable regardless of which channels
+        # are in scope.
+        #
+        # Data sources (both populated before Phase 4 runs):
         #   LinkedIn followers/ppw  → config.preloaded_channel_data["linkedin"]
         #   Other channels ppw/status → audit_data["freshness"]["channels"]
         #     (already applies intake-frequency fallback and api_blocked neutrality)
@@ -893,45 +901,73 @@ Respond with ONLY this exact JSON (no markdown fences, no extra keys):
         li_follow = li_data.get("followers")        # int or None
         li_ppw    = li_data.get("posts_per_week")   # float or None
 
-        if not config.linkedin_url:
-            li_score = 0   # LinkedIn not configured
-        elif li_follow is None and li_ppw is None:
-            li_score = 15  # scrape failed — neutral, preserves old binary credit
+        # Decide in-scope channels — those provided in intake or with
+        # detected signal. Anything else is excluded from scoring.
+        in_scope: list = []
+        if config.linkedin_url:
+            in_scope.append("LinkedIn")
+        for ch in config.active_social_channels:
+            if ch not in in_scope:
+                in_scope.append(ch)
+
+        # ── LinkedIn — score only if in scope ──────────────────────
+        if "LinkedIn" in in_scope:
+            if li_follow is None and li_ppw is None:
+                li_score = 15  # scrape failed — neutral
+            else:
+                if   li_follow is None:   li_pts = 10
+                elif li_follow == 0:      li_pts = 0
+                elif li_follow <= 100:    li_pts = 5
+                elif li_follow <= 500:    li_pts = 10
+                elif li_follow <= 2000:   li_pts = 20
+                elif li_follow <= 5000:   li_pts = 30
+                else:                     li_pts = 40
+
+                if   li_ppw is None:     li_freq = 3
+                elif li_ppw == 0:        li_freq = 0
+                elif li_ppw <= 2:        li_freq = 5
+                elif li_ppw <= 5:        li_freq = 10
+                else:                    li_freq = 8
+
+                li_score = min(50, li_pts + li_freq)
+            li_max = 50
         else:
-            # Follower tier
-            if   li_follow is None:   li_pts = 10   # partial data — mid-tier neutral
-            elif li_follow == 0:      li_pts = 0
-            elif li_follow <= 100:    li_pts = 5
-            elif li_follow <= 500:    li_pts = 10
-            elif li_follow <= 2000:   li_pts = 20
-            elif li_follow <= 5000:   li_pts = 30
-            else:                     li_pts = 40   # 5,000+
+            li_score = 0
+            li_max   = 0   # LinkedIn excluded from the denominator
 
-            # Posting frequency bonus
-            if   li_ppw is None:     li_freq = 3   # unknown — small neutral credit
-            elif li_ppw == 0:        li_freq = 0
-            elif li_ppw <= 2:        li_freq = 5
-            elif li_ppw <= 5:        li_freq = 10  # 3–5×/week: ideal
-            else:                    li_freq = 8   # 6+/week: slight overposting demerit
-
-            li_score = min(50, li_pts + li_freq)
-
-        # Other channels: binary presence + confirmed-activity bonus
+        # ── Other channels — only those in scope ───────────────────
         fresh_channels = audit_data.get("freshness", {}).get("channels", {})
         other_pts = 0
-        for ch in config.active_social_channels:
+        other_max = 0
+        for ch in in_scope:
             if ch == "LinkedIn":
                 continue
-            other_pts += 10                              # binary: channel URL configured
+            other_max += 13                       # max per channel: 10 + 3
+            other_pts += 10                       # binary: channel URL configured
             ch_data   = fresh_channels.get(ch, {})
             ch_ppw    = ch_data.get("posts_per_week")
             ch_status = ch_data.get("status", "")
             if ch_ppw is not None and ch_ppw > 0:
-                other_pts += 3   # confirmed active
+                other_pts += 3
             elif ch_status == "api_blocked":
-                other_pts += 2   # can't verify — partial credit, never penalise
+                other_pts += 2
 
-        social_score = min(80, li_score + min(40, other_pts))
+        # Cap the other-channels max at 40 (same ceiling as before)
+        other_max = min(40, other_max)
+        other_pts = min(40, other_pts)
+
+        # Renormalize: scale the in-scope total to the same 0-80 scale
+        # the old formula used, so downstream math (a-pillar weighting,
+        # report grade thresholds) stays unchanged.
+        total_pts = li_score + other_pts
+        total_max = li_max + other_max
+        if total_max > 0:
+            social_score = round((total_pts / total_max) * 80)
+        else:
+            # No channels in scope — score is unverifiable. Neutral 50
+            # so the Audience pillar isn't penalised for data we never
+            # asked about and never detected.
+            social_score = 50
 
         c = round((fresh + seo + web.get("content", 50)) / 3)
         # Audience pillar — per Dave 2026-05-03: socials now weighted at 15%
