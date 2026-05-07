@@ -1779,6 +1779,55 @@ def _add_cors(response):
     return response
 
 
+def _visitor_ip(req) -> str:
+    """
+    Resolve the actual client IP behind Railway's proxy.
+
+    Per Dave 2026-05-07 (Phase-1 anti-spam): the previous code called
+    `get_public_ip()` which fetches the SERVER'S OWN public IP via
+    api.ipify.org — so the rate limiter was logging the same Railway
+    server IP for every audit, making the IP cooldown effectively
+    useless against bots rotating fake emails.
+
+    Resolution order:
+      1. X-Forwarded-For — comma-separated list, leftmost = original client
+      2. X-Real-IP        — single value, set by some proxies
+      3. CF-Connecting-IP — Cloudflare-style fallback
+      4. req.remote_addr  — last-resort (proxy IP, but better than nothing)
+    """
+    xff = (req.headers.get("X-Forwarded-For") or "").strip()
+    if xff:
+        # Leftmost entry is the original client; subsequent entries are the
+        # proxy chain. Strip whitespace per RFC 7239 / common practice.
+        first = xff.split(",")[0].strip()
+        if first:
+            return first
+    real = (req.headers.get("X-Real-IP") or "").strip()
+    if real:
+        return real
+    cf = (req.headers.get("CF-Connecting-IP") or "").strip()
+    if cf:
+        return cf
+    return (req.remote_addr or "").strip() or "0.0.0.0"
+
+
+def _log_abuse_signal(signal_type: str, **fields):
+    """
+    Structured log for abuse-pattern grep (per Dave 2026-05-07 Phase-1).
+    Format: `[ABUSE_SIGNAL] type=<signal_type> key1=val1 key2=val2 ...`
+    so `grep '[ABUSE_SIGNAL]' railway.log` returns one line per event.
+    """
+    parts = [f"type={signal_type}"]
+    for k, v in fields.items():
+        # Quote any value containing a space; otherwise leave bare for
+        # cleaner greppability in single-line scans.
+        sval = str(v)
+        if " " in sval or "\t" in sval:
+            sval = f'"{sval}"'
+        parts.append(f"{k}={sval}")
+    log.warning("[ABUSE_SIGNAL] " + " ".join(parts))
+
+
 # ══════════════════════════════════════════════════════════════════
 #  FLASK ROUTES
 # ══════════════════════════════════════════════════════════════════
@@ -1857,21 +1906,28 @@ def webhook():
 
     contact_email = config.contact_email
     website_url   = config.website_url or config.linktree_url
-    ip_address    = request.remote_addr or None
+    visitor_ip    = _visitor_ip(request)
 
-    log.info("Client: %r  email: %s  url: %s", config.client_name, contact_email, website_url)
+    log.info("Client: %r  email: %s  url: %s  ip: %s",
+             config.client_name, contact_email, website_url, visitor_ip)
 
     # ── Rate limit check ──────────────────────────────────────────
     rl = RateLimiter()
-    pub_ip = get_public_ip() if not rl.bypass else None
     allowed, reason = rl.check(
         email       = contact_email,
         website_url = website_url,
-        ip_address  = pub_ip or ip_address,
+        ip_address  = visitor_ip,
     )
     if not allowed:
-        log.info("Rate limit blocked: %s — %s", contact_email, reason.split("\n")[0])
-        # Send a polite rejection email to the client
+        # Structured abuse signal — grep with `[ABUSE_SIGNAL] type=rate_limit`.
+        _log_abuse_signal(
+            "rate_limit",
+            endpoint   = "/intake",
+            ip         = visitor_ip,
+            email      = contact_email,
+            domain     = (website_url or "").split("//")[-1].split("/")[0],
+            reason     = reason.split("\n")[0],
+        )
         _send_rejection_email(contact_email, config.client_name, reason)
         return jsonify({"status": "rate_limited", "message": reason}), 429
 
@@ -1879,7 +1935,7 @@ def webhook():
     t = threading.Thread(
         target   = _audit_thread,
         args     = (config, rl, contact_email, website_url,
-                    pub_ip or ip_address, token),
+                    visitor_ip, token),
         daemon   = True,
         name     = f"audit-{token[:8]}",
     )
@@ -1952,18 +2008,26 @@ def cash_report():
 
     contact_email = config.contact_email
     website_url   = config.website_url or config.linktree_url
-    ip_address    = request.remote_addr or None
+    visitor_ip = _visitor_ip(request)
 
     # Rate limit check
     rl = RateLimiter()
-    pub_ip = get_public_ip() if not rl.bypass else None
     allowed, reason = rl.check(
         email       = contact_email,
         website_url = website_url,
-        ip_address  = pub_ip or ip_address,
+        ip_address  = visitor_ip,
     )
     if not allowed:
-        log.info("Rate limit blocked Wix submission: %s", contact_email)
+        log.info("Rate limit blocked Wix submission: %s  ip=%s", contact_email, visitor_ip)
+        # Structured abuse signal — grep with `[ABUSE_SIGNAL] type=rate_limit`.
+        _log_abuse_signal(
+            "rate_limit",
+            endpoint   = "/cash-report",
+            ip         = visitor_ip,
+            email      = contact_email,
+            domain     = (website_url or "").split("//")[-1].split("/")[0],
+            reason     = reason.split("\n")[0],
+        )
         _send_rejection_email(contact_email, config.client_name, reason)
         return _add_cors(jsonify({"success": False, "message": "Too many submissions. Please try again later."})), 429
 
@@ -1971,7 +2035,7 @@ def cash_report():
     token = f"wix-{contact_email}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
     t = threading.Thread(
         target = _audit_thread,
-        args   = (config, rl, contact_email, website_url, pub_ip or ip_address, token),
+        args   = (config, rl, contact_email, website_url, visitor_ip, token),
         daemon = True,
         name   = f"wix-audit-{contact_email[:12]}",
     )
