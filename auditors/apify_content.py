@@ -65,10 +65,29 @@ _ACTOR_URL = (
 )
 
 # ── Call parameters ───────────────────────────────────────────────────────────
+#
+# Per Dave 2026-05-07: Apify monthly limit was hit during smoke-testing,
+# costing the report-held outage on the SPR audit. Tighten the call
+# envelope without sacrificing coverage:
+#
+#   _MAX_PAGES  15 → 12  : ~20% fewer Playwright renders per audit. Most
+#                          beta sites surfaced 7-15 pages of useful content;
+#                          12 keeps homepage + about + services + 6-9
+#                          inner pages, which is still ample for the
+#                          regex/schema scans downstream.
+#   _MAX_DEPTH   2 → 1   : sitemap-fed start_urls already include blog
+#                          posts directly (per _fetch_sitemap_urls); the
+#                          extra depth-2 hop was mostly redundant for
+#                          sites with a published sitemap, while burning
+#                          ~30% of the per-call render budget.
+#
+# Together these save roughly 30-40% of Apify-render cost per audit at
+# negligible coverage loss. The bigger static-first-then-Apify refactor
+# is queued for the weekend.
 
-_MAX_PAGES  = 15
-_MAX_DEPTH  = 2
-_TIMEOUT    = 150   # s — cold start 30-60s + render time for 15 pages
+_MAX_PAGES  = 12
+_MAX_DEPTH  = 1
+_TIMEOUT    = 150   # s — cold start 30-60s + render time for 12 pages
 _RETRY_WAIT = 10    # s — wait before single retry (actor call and htmlUrl fetch)
 
 # ── Page selection — priority path groups ────────────────────────────────────
