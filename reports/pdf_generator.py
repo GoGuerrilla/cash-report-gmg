@@ -1021,9 +1021,13 @@ class PDFReportGenerator:
         if plat_table:
             body += f'{_sub("Platform Fit for Target Market")}{plat_table}'
 
-        all_issues    = icp.get("issues", []) + brand.get("issues", [])
-        all_strengths = icp.get("strengths", []) + brand.get("strengths", [])
-        body += _split_table(all_issues, all_strengths)
+        # Per Dave 2026-05-07: previously merged ICP + Brand issues under
+        # Audience, while the Content page ALSO rendered every brand issue
+        # under its Brand Consistency section — same finding shown twice
+        # in one report. De-dupe by keeping only ICP issues here; brand
+        # findings stay on the Content page where the Brand Consistency
+        # score lives.
+        body += _split_table(icp.get("issues", []), icp.get("strengths", []))
 
         if rec_rows:
             body += _sub("Audience & ICP Recommendations")
