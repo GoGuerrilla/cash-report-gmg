@@ -3,8 +3,10 @@ C.A.S.H. Report — Rate Limiter
 
 Rules (configurable at top of file)
 -------------------------------------
-  IP address  : 1 audit per 7 days per detected public IP
-  Email       : 1 audit per 7 days per email address
+  IP address  : 1 audit per 7 days per detected public IP (anti-spam — keeps
+                shared-IP coffee-shop / coworking spaces from getting locked)
+  Email       : 1 audit per 30 days per email address (Dave 2026-05-07 —
+                report is the same for the same email until they ship changes)
   Website URL : 1 audit per 30 days per website (protocol/www-normalized)
   Daily total : max 25 audits per calendar day (system-wide, override via DAILY_AUDIT_CAP env var)
   Whitelist   : when enabled, only approved emails may run audits
@@ -38,8 +40,12 @@ from datetime import datetime, timedelta, date
 from typing import Optional, Tuple
 
 # ── Configurable limits ────────────────────────────────────────
+# Per Dave 2026-05-07: 30-day cooldown per successful audit on email + URL.
+# IP stays at 7 days — a single IP can serve multiple legitimate prospects
+# (shared offices, coffee shops, agency networks); 7 days is enough to stop
+# bot abuse without locking out real users behind shared NAT.
 IP_COOLDOWN_DAYS      = 7
-EMAIL_COOLDOWN_DAYS   = 7
+EMAIL_COOLDOWN_DAYS   = 30
 WEBSITE_COOLDOWN_DAYS = 30
 DAILY_MAX_AUDITS      = int(os.environ.get("DAILY_AUDIT_CAP", "25"))
 
