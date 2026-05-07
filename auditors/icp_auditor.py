@@ -82,7 +82,15 @@ class ICPAuditor:
         self.config    = config
         self.linktree  = linktree_data
         self.preloaded = config.preloaded_channel_data
-        self.icp       = config.stated_target_market or "their ideal client"
+        # Per Dave 2026-05-07: when no stated_target_market is captured,
+        # the previous "their ideal client" fallback was leaking into quoted
+        # contexts like `in the 'their ideal client' segment` — looks like
+        # a placeholder bug to the reader. Switch to "your ideal client"
+        # (still a fallback but reads as direct guidance, not a stub) and
+        # flag the missing-ICP case so quoted findings can be skipped or
+        # rephrased without the awkward quote.
+        self.has_stated_icp = bool(config.stated_target_market)
+        self.icp       = config.stated_target_market or "your ideal client"
         self.keywords  = _derive_icp_keywords(config.stated_target_market)
 
     def run(self) -> Dict[str, Any]:
@@ -445,9 +453,16 @@ class ICPAuditor:
                 "timeline": "This week",
             })
 
+        # Per Dave 2026-05-07: when no ICP was captured at intake, drop the
+        # awkward `'<icp>' segment` quoted form — reads like a placeholder
+        # bug. Use a clean phrasing that doesn't quote a fallback string.
+        _icp_seg = (
+            f"in the '{icp}' segment" if self.has_stated_icp
+            else "across the audiences you currently serve"
+        )
         recs.append({
             "priority": "HIGH",
-            "action":   f"Conduct ICP interviews with 3 current or past clients in the '{icp}' segment",
+            "action":   f"Conduct ICP interviews with 3 current or past clients {_icp_seg}",
             "detail":   (
                 "Record their exact words around pain points, goals, and buying triggers. "
                 "Use that verbatim language across all marketing channels."

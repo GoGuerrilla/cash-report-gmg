@@ -510,6 +510,21 @@ REQUIRED instead — every recommendation must:
   ✓ Quantify the expected outcome ('lift conversion from 30/100 to 50+' not 'improve conversion')
   ✓ Reference observed audit findings ('the 13.8s LCP is bouncing paid traffic' not 'fix performance issues')
 
+AUDIENCE — write for a small-business owner or solo operator, NOT a dev team. No jargon
+in the action/outcome fields. If a finding is technical (LCP, TBT, render-blocking,
+above-the-fold, network waterfall, schema markup, JSON-LD, hydration), translate it:
+  ❌ "Eliminate the render-blocking resources causing the 16.5s LCP — audit the network waterfall
+     in PageSpeed Insights and defer or compress the largest above-the-fold asset."
+  ✅ "Your homepage takes 16.5 seconds to show — visitors leave before they read anything.
+     Ask your web developer to compress the big homepage image and remove the apps that
+     block the page from drawing. Goal: under 3 seconds."
+  ❌ "Add FAQPage JSON-LD schema markup."
+  ✅ "Add a Frequently Asked Questions section to your homepage with 5 short Q&A blocks —
+     this is what Google's AI Overviews use to answer questions about your business."
+Plain-language WHAT + plain-language WHY. The HOW (specific tags / waterfall analysis)
+is the dev team's job, not the operator's. Rule of thumb: if a non-technical client
+would have to Google the term to understand the recommendation, rewrite it.
+
 If you cannot make a recommendation specific using the data above, do not include it at all. A shorter, more specific output is always better than a longer, more generic one.
 
 LENGTH CAPS (HARD LIMITS — readers scan, not read):
