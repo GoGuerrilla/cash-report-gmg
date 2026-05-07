@@ -127,9 +127,15 @@ class ICPAuditor:
         issues, strengths = [], []
 
         if not self.config.stated_target_market:
+            # Per Dave 2026-05-07: previous message hard-coded "Complete Q4
+            # in the intake form" — wrong for admin-triggered audits where
+            # the admin form has a different field structure. Reword to be
+            # path-agnostic.
             issues.append(
-                "🔴 No target market defined — ICP alignment cannot be scored. "
-                "Complete Q4 in the intake form."
+                "🟡 No target market provided — ICP alignment can't be "
+                "scored without one. If you have an ideal client in mind, "
+                "supply industry + role + revenue range (e.g. 'B2B SaaS "
+                "founders, $1-10M ARR') and rerun the audit."
             )
             return {"issues": issues, "strengths": strengths, "stated": ""}
 

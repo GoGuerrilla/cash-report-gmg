@@ -2191,6 +2191,10 @@ a.ul:hover{text-decoration:underline}
         <input type="text" name="contact_email" placeholder="client@example.com">
       </div>
       <div>
+        <label>Target Market / ICP</label>
+        <textarea name="target_market" rows="2" placeholder="Who is this client's ideal customer? e.g. 'B2B SaaS founders, $1-10M ARR'"></textarea>
+      </div>
+      <div>
         <button type="submit" class="btn">&#9654; Run Audit</button>
       </div>
     </form>
@@ -2328,7 +2332,12 @@ def admin_trigger():
         "business_name":     business_name or "Manual Audit",
         "website_url":       website_url,
         "contact_email":     contact_email,
-        "target_market":     "",
+        # Per Dave 2026-05-07: read target_market from the admin form so
+        # admin-triggered audits no longer fire "Complete Q4 in the intake
+        # form" on every run. The admin trigger now mirrors the public
+        # form's required-ICP behaviour, except optional (admins may
+        # genuinely want to run an unscored alignment audit).
+        "target_market":     request.form.get("target_market", "").strip(),
         "monthly_ad_budget": "0",
         "email_list_size":   "0",
         "email_frequency":   "",
