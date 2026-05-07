@@ -612,6 +612,17 @@ class PDFReportGenerator:
 
     def _page_cover(self) -> str:
         cfg = self.config
+        # Crawl timestamp — surface the exact moment the audit started so
+        # clients know whether the data reflects a pre- or post-deploy state.
+        # Per Dave 2026-05-07 (and Swift Profit Systems beta feedback that
+        # cited a stale 5.7s LCP captured before their same-day deploy).
+        crawl_ts = self.data.get("audit_started_at") or ""
+        crawl_meta = ""
+        if crawl_ts:
+            crawl_meta = (
+                f'<div><strong>Data collected:</strong> {_h(crawl_ts)} (UTC)</div>'
+            )
+
         body = (
             f'<div class="cover-logo-wrap">'
             f'<img class="cover-logo-img" src="{self.logo_src}" alt="GMG"/></div>'
@@ -625,8 +636,16 @@ class PDFReportGenerator:
             f'<div class="cover-meta">'
             f'<div><strong>Prepared by:</strong> {_h(cfg.agency_name)}</div>'
             f'<div><strong>Date:</strong> {_h(self.date_str)}</div>'
+            f'{crawl_meta}'
             f'<div><strong>Website:</strong> {_h(cfg.website_url or "—")}</div>'
             f'<div><strong>Industry:</strong> {_h(cfg.industry_category or cfg.client_industry or "—")}</div>'
+            f'</div>'
+            f'<div style="font-size:9px;color:rgba(255,255,255,.4);'
+            f'margin-top:14px;line-height:1.4">'
+            f'Performance scores (LCP, TBT, Lighthouse) reflect the public '
+            f'Lighthouse cache at the time of crawl. Recent deploys may not '
+            f'be reflected — re-run the audit after a deploy to see updated '
+            f'numbers.'
             f'</div>'
         )
         return _pg(1, body, self.date_str, self.logo_src)

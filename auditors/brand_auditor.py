@@ -78,17 +78,42 @@ class BrandAuditor:
         stated_market = self.config.stated_target_market.lower()
         bio_lower = bio.lower()
 
-        # Empty/missing bio — emit one clear finding and skip the
-        # downstream "does NOT mention target market" check (which renders
-        # as the misleading "Bio says: '...'" string when bio is empty).
-        # Per Dave 2026-05-06: the empty case was producing two stacked
-        # findings, one of them with literal '…' that looked like a bug.
+        # Empty/missing bio — emit one clear finding tuned to which scrape
+        # path actually ran. Per Dave 2026-05-07: the previous one-size
+        # message implied "we scraped a profile and it had no bio" even
+        # when no social profile was scraped at all (e.g. website-only
+        # client where we only checked footer links). Distinguish:
+        #   - ok_linktree         : real profile scraped; bio is empty there
+        #   - ok_website_fallback : no profile scraped — only checked website
+        #                           footer for outbound social links
+        #   - other / no_url      : no source available
         if not bio:
-            issues.append(
-                "🟡 Social bio not detected on the social profile we scraped — "
-                "either the profile has no bio set, or the bio is rendered in a "
-                "format the scraper can't read (e.g., image)."
-            )
+            scrape_status = self.linktree.get("scrape_status", "") or ""
+            if scrape_status == "ok_linktree":
+                msg = (
+                    "🟡 Social profile bio is empty — first touchpoint has "
+                    "no positioning. Add 1 sentence naming who you serve "
+                    "and the outcome you deliver so cold visitors self-"
+                    "qualify in seconds."
+                )
+            elif scrape_status == "ok_website_fallback":
+                msg = (
+                    "🟡 No social profile bio could be read — the audit "
+                    "didn't find a Linktree-style profile to scrape, only "
+                    "website footer links to platforms. The bio shown on "
+                    "your LinkedIn / Instagram / Facebook profile is your "
+                    "actual first touchpoint and should name who you "
+                    "serve plus the outcome you deliver."
+                )
+            else:
+                msg = (
+                    "🟡 No social profile bio available — neither a "
+                    "Linktree-style profile URL nor a website with "
+                    "outbound social links was provided. If you have a "
+                    "primary social profile, share its URL so the bio "
+                    "can be evaluated against your stated target market."
+                )
+            issues.append(msg)
             return {"issues": issues, "strengths": strengths, "bio_text": bio}
 
         # Check if bio mentions the stated target market

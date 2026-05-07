@@ -772,13 +772,19 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
     """
     audit_wall_start = time.time()
     name = config.client_name
-    log.info("=== AUDIT START: %s  [%s] ===", name, datetime.utcnow().isoformat())
+    audit_started_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    log.info("=== AUDIT START: %s  [%s] ===", name, audit_started_at)
 
     # ── Channel data skeleton ─────────────────────────────────────
     channel_data = _build_base_channel_data(config.website_url or config.linktree_url or "")
     config.preloaded_channel_data = channel_data
 
-    audit_data: dict = {}
+    audit_data: dict = {
+        # Per Dave 2026-05-07: surface the crawl timestamp on the PDF cover
+        # so clients know exactly when the data was collected and can
+        # interpret performance scores accordingly. Reads ISO-8601 UTC.
+        "audit_started_at": audit_started_at,
+    }
 
     # ══ Phase 1: Social data collection (sequential — each step ══
     #             feeds into channel_data used by later auditors)   ══
