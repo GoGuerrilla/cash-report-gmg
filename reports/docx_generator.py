@@ -214,6 +214,30 @@ class DocxReportGenerator:
         rf.font.name = "Calibri"; rf.font.size = Pt(9)
         rf.font.color.rgb = _rgb(MGRAY)
 
+        # Crawl timestamp + freshness disclaimer — per Dave 2026-05-07 (DOCX
+        # parity with PDF cover, originally added in 5cc4a64). Surfaces the
+        # exact time the audit ran so clients can interpret performance scores.
+        crawl_ts = self.data.get("audit_started_at") or ""
+        if crawl_ts:
+            pt = doc.add_paragraph()
+            pt.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            rt = pt.add_run(f"Data collected: {crawl_ts} (UTC)")
+            rt.font.name = "Calibri"; rt.font.size = Pt(9)
+            rt.font.color.rgb = _rgb(MGRAY)
+
+        pd = doc.add_paragraph()
+        pd.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        pd.paragraph_format.space_before = Pt(8)
+        rd = pd.add_run(
+            "Performance scores (LCP, TBT, Lighthouse) reflect the public "
+            "Lighthouse cache at the time of crawl. Recent deploys may not "
+            "be reflected — re-run the audit after a deploy to see updated "
+            "numbers."
+        )
+        rd.font.name = "Calibri"; rd.font.size = Pt(8)
+        rd.font.color.rgb = _rgb(MGRAY)
+        rd.italic = True
+
     # ── GMG Introduction page ──────────────────────────────────
 
     def _build_intro_page(self, doc: Document):
@@ -1080,7 +1104,31 @@ class DocxReportGenerator:
         # Google Business Profile
         gbp = self.data.get("gbp", {})
         if gbp.get("found"):
-            self._subsection(doc, "Google Business Profile  (Live — Google Places API)")
+            # Per Dave 2026-05-07 (DOCX parity audit): the previous subsection
+            # title claimed "(Live — Google Places API)" but we don't call the
+            # Places API. PDF was fixed in 68f55fc with a data-source caveat;
+            # bring DOCX in line so the report stops lying about its sources.
+            gbp_source = gbp.get("data_source", "")
+            is_verified_gbp = (gbp_source == "google_places_api")
+            title_suffix = (
+                "(Live — Google Places API)" if is_verified_gbp
+                else "(website signals + Maps search lookup)"
+            )
+            self._subsection(doc, f"Google Business Profile  {title_suffix}")
+
+            # Data-source caveat — only when not from a verified GBP API path.
+            if not is_verified_gbp:
+                self._callout(
+                    doc,
+                    "Data source: website crawl (NAP/schema/Maps-link "
+                    "detection) plus a Google Maps search lookup. We do not "
+                    "currently call the Google Places API, so phone, address, "
+                    "and signal-coverage values reflect what is publicly "
+                    "visible on the client's website — not what is filed in "
+                    "the verified Google Business Profile.",
+                    GOLD,
+                )
+
             rating_str = f"{gbp['rating']}/5" if gbp.get("rating") else "No rating"
             # Per beta feedback (Swift Profit Systems 2026-05-05): never present
             # estimated review counts as findings — they're regex-scraped and
@@ -1097,10 +1145,28 @@ class DocxReportGenerator:
             listing_found = gbp.get("is_likely_verified", gbp.get("found", False))
             listing_str = ("✅ Yes — name appears in Maps" if listing_found
                            else "⚠️ Not found — GBP not claimed")
+
+            # Phone/address attribution suffixes — same pattern as PDF.
+            phone_val = gbp.get("phone") or "—"
+            addr_val  = gbp.get("address") or "—"
+            if not is_verified_gbp:
+                if phone_val != "—":
+                    phone_val = f"{phone_val}  (from website — verify against GBP)"
+                if addr_val != "—":
+                    addr_val  = f"{addr_val}  (from website — verify against GBP)"
+
+            # "Profile Complete" relabel — only valid when source IS the
+            # Places API. Otherwise it measures website-side signal coverage
+            # and the label needs to say so.
+            complete_label = (
+                "Profile Complete" if is_verified_gbp
+                else "Web Signal Coverage  (website signals on site, not GBP completeness)"
+            )
+
             rows = [
                 ("Business Name",      gbp.get("business_name", "—")),
-                ("Address",            gbp.get("address", "—")),
-                ("Phone",              gbp.get("phone") or "—"),
+                ("Address",            addr_val),
+                ("Phone",              phone_val),
                 ("Rating",             rating_str),
                 ("Total Reviews",      reviews_str),
                 ("Photos on Profile",  str(gbp.get("photo_count", 0))),
@@ -1108,7 +1174,7 @@ class DocxReportGenerator:
                 ("Profile Status",     gbp.get("business_status", "—")),
                 ("Listing Found",      listing_str),
                 ("GBP Posts",          "Cannot verify via Places API"),
-                ("Profile Complete",   f"{gbp.get('completeness_pct', 0)}%"),
+                (complete_label,       f"{gbp.get('completeness_pct', 0)}%"),
                 ("GBP Score",          f"{gbp.get('score', 50)}/100  ({gbp.get('grade', 'C')})"),
             ]
             self._detail_table(doc, ["FIELD", "VALUE"], rows,
