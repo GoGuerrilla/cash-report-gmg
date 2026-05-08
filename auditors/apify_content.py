@@ -109,7 +109,19 @@ _PRIORITY_GROUPS = [
 
 # ── Blog URL patterns and JSON-LD types ──────────────────────────────────────
 
-_BLOG_SEGS  = ("/post/", "/blog/", "/articles/", "/news/", "/insights/")
+_BLOG_SEGS  = (
+    "/post/", "/blog/", "/articles/", "/news/", "/insights/", "/journal/",
+    "/stories/", "/learn/", "/resources/",
+    # Compound-slug variants — Wix and Squarespace clients often use a
+    # branded prefix on the blog path (e.g. /marketing-insights/,
+    # /our-blog/, /agency-articles/). Per Dave 2026-05-08 GMG smoke test:
+    # the blog at /marketing-insights/<post> was being classified as
+    # `pages` instead of `blog_posts` because the prior `/insights/`
+    # entry wouldn't substring-match `/marketing-insights/` (the leading
+    # `/` doesn't match — preceded by `-`).
+    "-insights/", "-blog/", "-articles/", "-stories/", "-news/",
+    "-journal/", "/blog-", "/insights-", "/blog-posts/",
+)
 _BLOG_TYPES = frozenset({"BlogPosting", "Article", "NewsArticle"})
 
 # ── CTA keyword set ───────────────────────────────────────────────────────────
@@ -402,39 +414,65 @@ def _parse_ctas(soup) -> List[Dict]:
     """
     Extract CTA buttons and links from full DOM — sitewide CTAs included.
     Deduplicates by lowercased text prefix. Capped at 20 per page.
+
+    Per Dave 2026-05-08 (GMG smoke test): Wix and other JS-heavy site
+    builders frequently render homepage buttons as anchors WITHOUT an
+    href attribute (click handlers attached via JS) or as `<div>` /
+    custom elements with role="button". The previous parser missed
+    every one of those, producing ctas=0 across 16 GMG pages while a
+    human visitor sees multiple visible buttons. Extend extraction to
+    cover the four Wix-style patterns so the CTA tally reflects what
+    the visitor actually sees.
     """
     ctas: List[Dict] = []
     seen: set         = set()
 
-    for btn in soup.find_all("button"):
-        text = btn.get_text(" ", strip=True)
+    def _consider(el, text: str, href: Optional[str], element_type: str):
+        """Apply the CTA keyword check + dedupe + cap. Pure helper."""
         if not text or len(text) > 80:
-            continue
-        if any(kw in text.lower() for kw in _CTA_KWS):
-            key = text.lower()[:40]
-            if key not in seen:
-                seen.add(key)
-                ctas.append({
-                    "text":         text,
-                    "href":         None,
-                    "location":     _infer_cta_location(btn),
-                    "element_type": "button",
-                })
+            return
+        if not any(kw in text.lower() for kw in _CTA_KWS):
+            return
+        key = text.lower()[:40]
+        if key in seen:
+            return
+        seen.add(key)
+        ctas.append({
+            "text":         text,
+            "href":         href,
+            "location":     _infer_cta_location(el),
+            "element_type": element_type,
+        })
 
+    # 1. <button> — semantic
+    for btn in soup.find_all("button"):
+        _consider(btn, btn.get_text(" ", strip=True), None, "button")
+
+    # 2. <a href> — semantic anchor with target
     for a in soup.find_all("a", href=True):
-        text = a.get_text(" ", strip=True)
-        if not text or len(text) > 80:
+        _consider(a, a.get_text(" ", strip=True), a.get("href"), "link")
+
+    # 3. <a> WITHOUT href — Wix theme pattern. Anchor element rendered
+    # for styling, click handler attached via JS. No href but still
+    # carries the visible button text in get_text.
+    for a in soup.find_all("a"):
+        if a.get("href"):
+            continue   # already covered by step 2
+        _consider(a, a.get_text(" ", strip=True), None, "link_no_href")
+
+    # 4. role="button" on any element — Wix and modern SPA patterns
+    for el in soup.find_all(attrs={"role": "button"}):
+        if el.name in ("button", "a"):
+            continue   # already covered by 1 / 2 / 3
+        _consider(el, el.get_text(" ", strip=True), None, "role_button")
+
+    # 5. Elements with onclick handlers (rare but seen on some Wix builds)
+    for el in soup.find_all(attrs={"onclick": True}):
+        if el.name in ("button", "a"):
             continue
-        if any(kw in text.lower() for kw in _CTA_KWS):
-            key = text.lower()[:40]
-            if key not in seen:
-                seen.add(key)
-                ctas.append({
-                    "text":         text,
-                    "href":         a.get("href"),
-                    "location":     _infer_cta_location(a),
-                    "element_type": "link",
-                })
+        if (el.get("role") or "").lower() == "button":
+            continue
+        _consider(el, el.get_text(" ", strip=True), None, "onclick")
 
     return ctas[:20]
 
