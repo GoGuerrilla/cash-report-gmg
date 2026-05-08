@@ -131,6 +131,11 @@ _CTA_KWS = frozenset({
     "watch", "play", "listen", "read more", "preview",
     "estimate", "quote", "proposal", "pricing", "plans", "view plans",
     "discovery", "strategy session", "intro call", "kick-off",
+    # Newsletter / advisory list CTAs (Dave 2026-05-08 — GMG: "Get
+    # Marketing Insights" was the email-list CTA, slipped the previous
+    # vocab entirely).
+    "insights", "newsletter", "weekly", "monthly", "daily",
+    "join the list", "join our list", "join the newsletter",
 })
 
 # ── Form type signals and precedence ─────────────────────────────────────────

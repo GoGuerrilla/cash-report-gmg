@@ -45,11 +45,24 @@ _LEAD_MAGNET_HREF_KWS = (
     "cash-report", "free-report", "free-audit", "lead-magnet",
     "checklist", "guide", "download", "report", "get-my",
     "free-guide", "ebook", "webinar", "resource", "audit",
+    # Per Dave 2026-05-08 (GMG): the agency's email-list CTA reads
+    # "Get Marketing Insights" → /insights or /newsletter. Add these
+    # paths so the lead-magnet detector catches advisory-style CTAs.
+    "insights", "newsletter", "subscribe", "join",
 )
 _LEAD_MAGNET_TEXT_KWS = (
     "free report", "free audit", "free guide", "free checklist",
     "free download", "get your free", "get my free", "download now",
     "get the report", "cash report", "free resource", "free ebook",
+    # Advisory / newsletter CTAs (Dave 2026-05-08 — GMG smoke test).
+    # Real-world copy is rarely "free [thing]" — it's "Get [thing]" or
+    # "Join the [list]". Cover both patterns.
+    "get marketing insights", "marketing insights",
+    "get insights", "weekly insights", "weekly tips",
+    "join the list", "join our list", "join the newsletter",
+    "subscribe", "get updates", "get the newsletter",
+    "get my free marketing audit", "get my marketing audit",
+    "get a free audit", "get my audit", "free marketing audit",
 )
 
 # Keywords used to identify the About page
