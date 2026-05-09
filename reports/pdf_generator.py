@@ -1686,6 +1686,46 @@ class PDFReportGenerator:
                 f'not GBP completeness</div>'
             )
 
+        # Service-area / home-based business detection (Dave 2026-05-09):
+        # when the website carries strong GBP signals (phone, schema, or
+        # detected review CTAs/links) but Maps lookup didn't confirm a
+        # listing, the most likely explanation is a service-area business
+        # with no public address — Google Maps doesn't surface those even
+        # when a GBP exists. Avoid the misleading "GBP not claimed"
+        # framing that implies the operator has no profile at all.
+        has_phone_signal     = bool(gbp.get("phone"))
+        has_schema_signal    = (gbp.get("schema_quality", 0) or 0) > 0
+        reviews_signal_score = (gbp.get("score_breakdown", {})
+                                   .get("reviews_promoted", 0) or 0) > 0
+        likely_service_area  = (
+            not gbp_listing_found
+            and (has_phone_signal or has_schema_signal or reviews_signal_score)
+        )
+        if gbp_listing_found:
+            listing_dot   = _sdot("g")
+            listing_class = "td-good"
+            listing_main  = "Yes — name appears in Maps"
+            listing_note  = ""
+        elif likely_service_area:
+            listing_dot   = _sdot("y")
+            listing_class = "td-warn"
+            listing_main  = "Not in Maps search results"
+            listing_note  = (
+                f'<div style="font-size:9px;color:rgba(255,255,255,.5);'
+                f'margin-top:3px;line-height:1.4">'
+                f'Typical for service-area / home-based businesses without a '
+                f'public address. Website signals suggest a GBP exists — '
+                f'verify manually at business.google.com. Reviews are only '
+                f'visible to the audit when the business has a public Maps '
+                f'listing.'
+                f'</div>'
+            )
+        else:
+            listing_dot   = _sdot("y")
+            listing_class = "td-warn"
+            listing_main  = "Not found — GBP not claimed"
+            listing_note  = ""
+
         gbp_grid = (
             f'<div class="gbp-grid">'
             f'<div class="gbp-field"><div class="gbp-field-label">Business Name</div>'
@@ -1700,9 +1740,8 @@ class PDFReportGenerator:
             f'<div class="gbp-field-value {"td-good" if gbp_hrs else "td-bad"}">'
             f'{_sdot("g") if gbp_hrs else _sdot("r")}{"Yes" if gbp_hrs else "No"}</div></div>'
             f'<div class="gbp-field"><div class="gbp-field-label">Listing Found</div>'
-            f'<div class="gbp-field-value {"td-good" if gbp_listing_found else "td-warn"}">'
-            f'{_sdot("g") if gbp_listing_found else _sdot("y")}'
-            f'{"Yes — name appears in Maps" if gbp_listing_found else "Not found — GBP not claimed"}</div></div>'
+            f'<div class="gbp-field-value {listing_class}">'
+            f'{listing_dot}{listing_main}{listing_note}</div></div>'
             f'<div class="gbp-field"><div class="gbp-field-label">NAP Consistent</div>'
             f'<div class="gbp-field-value {"td-good" if gbp_nap else "td-warn"}">'
             f'{_sdot("g") if gbp_nap else _sdot("y")}{"Yes" if gbp_nap else "Check needed"}</div></div>'

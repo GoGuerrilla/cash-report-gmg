@@ -1150,8 +1150,33 @@ class DocxReportGenerator:
             else:
                 reviews_str = "—"
             listing_found = gbp.get("is_likely_verified", gbp.get("found", False))
-            listing_str = ("✅ Yes — name appears in Maps" if listing_found
-                           else "⚠️ Not found — GBP not claimed")
+
+            # Service-area / home-based business detection (Dave 2026-05-09):
+            # parallel of pdf_generator.py — when website signals are
+            # strong but Maps lookup didn't confirm, the operator likely
+            # has a service-area GBP that Google Maps doesn't surface.
+            # Avoid the misleading "GBP not claimed" framing.
+            has_phone_signal     = bool(gbp.get("phone"))
+            has_schema_signal    = (gbp.get("schema_quality", 0) or 0) > 0
+            reviews_signal_score = (gbp.get("score_breakdown", {})
+                                       .get("reviews_promoted", 0) or 0) > 0
+            likely_service_area  = (
+                not listing_found
+                and (has_phone_signal or has_schema_signal or reviews_signal_score)
+            )
+            if listing_found:
+                listing_str = "✅ Yes — name appears in Maps"
+            elif likely_service_area:
+                listing_str = (
+                    "🟡 Not in Maps search results — typical for "
+                    "service-area / home-based businesses without a public "
+                    "address. Website signals suggest a GBP exists; verify "
+                    "manually at business.google.com. Reviews are only "
+                    "visible to the audit when the business has a public "
+                    "Maps listing."
+                )
+            else:
+                listing_str = "⚠️ Not found — GBP not claimed"
 
             # Phone/address attribution suffixes — same pattern as PDF.
             phone_val = gbp.get("phone") or "—"
