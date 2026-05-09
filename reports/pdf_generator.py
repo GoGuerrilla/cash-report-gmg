@@ -1606,7 +1606,12 @@ class PDFReportGenerator:
         # actually scraped from the client's website is a fabrication the
         # reader can't see through. Show the source explicitly.
         gbp_source = gbp.get("data_source", "")
-        is_verified_gbp = (gbp_source == "google_places_api")
+        # Per Dave 2026-05-09: Apify google-maps-scraper returns verified
+        # GMB data (rating, reviewsCount, address, phone, place URL) — same
+        # confidence level as Places API for our purposes. Treat both as
+        # verified so the data-source caveat banner only appears when
+        # we're rendering regex-scraped values.
+        is_verified_gbp = gbp_source in ("google_places_api", "apify_google_maps")
         source_caveat = ""
         if not is_verified_gbp:
             source_caveat = (
@@ -1901,6 +1906,7 @@ class PDFReportGenerator:
 
         gbp_source_label = {
             "google_places_api":         "Google Places API (verified)",
+            "apify_google_maps":         "Apify google-maps-scraper (verified)",
             "website_scrape_maps_html":  "Website signals + Maps HTML lookup",
             "website_scrape_maps_html+inner_page_rescan":
                                          "Website signals + Maps lookup + inner-page rescan",
@@ -1947,7 +1953,7 @@ class PDFReportGenerator:
             _row("LinkedIn profile",    bool(self.config.linkedin_url),
                  "Not linked from website footer/header; Google profile lookup also returned no result."),
             _row("Google Business Profile",
-                 gbp.get("data_source") == "google_places_api"
+                 gbp.get("data_source") in ("google_places_api", "apify_google_maps")
                  or bool(gbp.get("place_url")),
                  "Listing not confirmed via Maps search; verified GBP API not in use."),
         ])

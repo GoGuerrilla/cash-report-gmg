@@ -1109,11 +1109,18 @@ class DocxReportGenerator:
             # Places API. PDF was fixed in 68f55fc with a data-source caveat;
             # bring DOCX in line so the report stops lying about its sources.
             gbp_source = gbp.get("data_source", "")
-            is_verified_gbp = (gbp_source == "google_places_api")
-            title_suffix = (
-                "(Live — Google Places API)" if is_verified_gbp
-                else "(website signals + Maps search lookup)"
-            )
+            # Per Dave 2026-05-09: Apify google-maps-scraper returns
+            # verified GMB data — same confidence level as Places API
+            # for our purposes. Treat both as verified so the
+            # caveat callout and "from website" suffixes only appear
+            # when we're rendering regex-scraped values.
+            is_verified_gbp = gbp_source in ("google_places_api", "apify_google_maps")
+            if gbp_source == "google_places_api":
+                title_suffix = "(Live — Google Places API)"
+            elif gbp_source == "apify_google_maps":
+                title_suffix = "(Live — Apify google-maps-scraper)"
+            else:
+                title_suffix = "(website signals + Maps search lookup)"
             self._subsection(doc, f"Google Business Profile  {title_suffix}")
 
             # Data-source caveat — only when not from a verified GBP API path.

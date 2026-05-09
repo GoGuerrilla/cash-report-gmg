@@ -38,9 +38,13 @@ Scoring rubric (100 pts total)
 
   Floor: 0 when no listing confirmed. Listing confirmed but sparse → 35.
 """
+import logging
+import os
 import re
 import json
+import urllib.error
 import urllib.parse
+import urllib.request
 from typing import Dict, Any, List, Optional, Tuple
 
 try:
@@ -49,6 +53,20 @@ try:
     _SCRAPING_OK = True
 except ImportError:
     _SCRAPING_OK = False
+
+log = logging.getLogger(__name__)
+
+# Apify Maps actor — Tier 3 verified data source. Per Dave 2026-05-09:
+# the regex-scraped review counts from Tier 2 (Maps HTML) were always
+# rendered as "Unverified" in the PDF because we couldn't be sure a
+# parenthesized number near the business name was actually a review
+# count vs ZIP / pixel / etc. compass/google-maps-scraper returns the
+# actual GMB record (rating, reviewsCount, address, hours, place URL),
+# costing roughly $0.005-0.01 per call. Default-on when APIFY_API_KEY
+# is set; kill switch via USE_APIFY_MAPS=0 env var.
+_APIFY_MAPS_ACTOR    = "compass~google-maps-scraper"
+_APIFY_MAPS_TIMEOUT  = 120   # s — Maps actor cold-starts in 30-60s
+_APIFY_MAPS_RETRY_WAIT = 8
 
 _HEADERS = {
     "User-Agent": (
@@ -177,6 +195,14 @@ class GBPAuditor:
 
         # ── Tier 2: Google Maps HTML (best-effort) ─────────────
         self._try_maps_search(signals)
+
+        # ── Tier 3: Apify Maps actor (verified GMB data) ───────
+        # Promotes regex-scraped values to verified ones when the Apify
+        # actor returns a confirmed match. Fires only when APIFY_API_KEY
+        # is set, USE_APIFY_MAPS != "0" (kill switch), and we have both
+        # a name and a website to disambiguate (Apify Maps queries by
+        # search string and a bare brand name returns random listings).
+        self._try_apify_maps(signals)
 
         # ── NAP consistency ────────────────────────────────────
         phones = [p for p in (
@@ -393,6 +419,138 @@ class GBPAuditor:
         except Exception:
             pass
 
+    # ── Tier 3: Apify Maps actor (verified GMB data) ───────────
+
+    def _try_apify_maps(self, signals: dict) -> None:
+        """
+        Apify compass/google-maps-scraper actor — Tier 3 verified data.
+
+        Promotes the regex-scraped Tier-2 fields to verified values when
+        the actor returns a confirmed match. Returns rating, reviewsCount,
+        address, phone, hours, and the canonical Maps place URL — all
+        sourced directly from Google's GMB record, not regex-scraped from
+        a search results page.
+
+        Cost: ~$0.005-0.01 per call via Apify. Fires only when:
+          - APIFY_API_KEY is set
+          - USE_APIFY_MAPS != "0" (kill switch)
+          - Both name and website are available (need both to disambiguate
+            short brand abbreviations like "GMG")
+
+        Failure-silent — never penalises the score, never raises.
+        """
+        if os.environ.get("USE_APIFY_MAPS", "1").strip() == "0":
+            return
+        api_key = os.environ.get("APIFY_API_KEY", "").strip()
+        if not api_key or not self.name or not self.website:
+            return
+
+        domain = _domain(self.website)
+        if not domain:
+            return
+
+        # Query: "<name> <domain>" — same disambiguation pattern used by
+        # _try_maps_search after 6e046ee. Apify returns a structured
+        # record so the regex match-confidence problem doesn't apply.
+        query = f"{self.name} {domain}"
+
+        payload = {
+            "searchStringsArray":          [query],
+            "maxCrawledPlacesPerSearch":   1,
+            "language":                    "en",
+            "scrapeReviews":               False,
+            "scrapeContacts":              False,
+            "scrapeImageAuthors":          False,
+            "exportPlaceUrls":             False,
+        }
+
+        url = (
+            f"https://api.apify.com/v2/acts/{_APIFY_MAPS_ACTOR}"
+            f"/run-sync-get-dataset-items?token={api_key}"
+        )
+
+        items: Optional[List[Dict]] = None
+        last_exc: Optional[Exception] = None
+        import time as _time
+        for attempt in (1, 2):
+            try:
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=_APIFY_MAPS_TIMEOUT) as resp:
+                    items = json.loads(resp.read().decode("utf-8"))
+                log.info(
+                    "apify_maps: attempt %d → %d items for %r",
+                    attempt, len(items or []), query,
+                )
+                break
+            except Exception as exc:
+                last_exc = exc
+                log.warning(
+                    "apify_maps: attempt %d failed for %r: %s",
+                    attempt, query, exc,
+                )
+                if attempt == 1:
+                    _time.sleep(_APIFY_MAPS_RETRY_WAIT)
+        if not items:
+            return
+
+        place = items[0] if isinstance(items, list) else None
+        if not isinstance(place, dict):
+            return
+
+        # Confirm match — title should overlap with the business name.
+        # Reject obviously-wrong results so we never overwrite Tier-2 with
+        # a different business's data.
+        title = (place.get("title") or "").lower().strip()
+        nm    = self.name.lower().strip()
+        if title and nm and (nm not in title) and (title not in nm):
+            log.info(
+                "apify_maps: title %r doesn't match name %r — discarding result",
+                title, nm,
+            )
+            return
+
+        # Promote regex-scraped fields to verified values.
+        if place.get("totalScore") is not None:
+            try:
+                signals["maps_rating"] = float(place["totalScore"])
+            except (TypeError, ValueError):
+                pass
+
+        if place.get("reviewsCount") is not None:
+            try:
+                signals["maps_review_count"]      = int(place["reviewsCount"])
+                signals["review_count_verified"]  = True
+                signals["review_count_method"]    = "apify_google_maps_scraper"
+            except (TypeError, ValueError):
+                pass
+
+        if place.get("phone"):
+            signals["maps_phone"] = str(place["phone"]).strip()
+
+        if place.get("address"):
+            # Use Apify's canonical address as a backstop when the
+            # website didn't surface one. Don't overwrite an existing
+            # site_address — that's a different (website-derived) field.
+            if not signals.get("site_address") and not signals.get("schema_address"):
+                signals["site_address"] = str(place["address"]).strip()
+
+        if place.get("url"):
+            # If the website never linked to Maps but Apify confirmed the
+            # listing exists, store the canonical Maps URL so the report
+            # can render it as the "Place URL" field — without flipping
+            # maps_link_on_site (which is specifically about whether the
+            # WEBSITE links out, used in Tier-1 scoring).
+            if not signals.get("maps_link_url"):
+                signals["maps_link_url"] = str(place["url"])
+            signals["maps_html_confirmed"] = True
+
+        signals["data_source_apify_maps"] = True
+
     # ── Score builder ──────────────────────────────────────────
 
     def _build_result(self, s: dict) -> Dict[str, Any]:
@@ -458,10 +616,19 @@ class GBPAuditor:
 
         issues, strengths = self._evaluate(s, listing_score, effective_phone, effective_address)
 
+        # Per Dave 2026-05-09: when Apify Maps actor returned a verified
+        # match, surface that in data_source so the PDF / DOCX renderers
+        # can drop the "we don't use Places API" caveat and show the
+        # values as Apify-verified. PDF generator's `is_verified_gbp`
+        # check accepts both "google_places_api" and the new
+        # "apify_google_maps" tag — see pdf_generator.py:1572.
+        ds_tag = ("apify_google_maps" if s.get("data_source_apify_maps")
+                  else "website_scrape_maps_html")
+
         return {
             "score":              score,
             "grade":              self._grade(score),
-            "data_source":        "website_scrape_maps_html",
+            "data_source":        ds_tag,
             "found":              listing_confirmed,
             "business_name":      self.name,
             "address":            effective_address,
