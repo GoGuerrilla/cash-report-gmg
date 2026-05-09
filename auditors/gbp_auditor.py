@@ -60,11 +60,21 @@ log = logging.getLogger(__name__)
 # the regex-scraped review counts from Tier 2 (Maps HTML) were always
 # rendered as "Unverified" in the PDF because we couldn't be sure a
 # parenthesized number near the business name was actually a review
-# count vs ZIP / pixel / etc. compass/google-maps-scraper returns the
-# actual GMB record (rating, reviewsCount, address, hours, place URL),
-# costing roughly $0.005-0.01 per call. Default-on when APIFY_API_KEY
-# is set; kill switch via USE_APIFY_MAPS=0 env var.
-_APIFY_MAPS_ACTOR    = "compass~google-maps-scraper"
+# count vs ZIP / pixel / etc. The Compass account maintains a Maps
+# scraper that returns the actual GMB record (rating, reviewsCount,
+# address, hours, place URL), costing roughly $0.005-0.01 per call.
+# Default-on when APIFY_API_KEY is set; kill switch via USE_APIFY_MAPS=0.
+#
+# Slug fallback chain — Apify periodically renames or republishes the
+# Compass Maps actors (saw HTTP 404 on `compass~google-maps-scraper` in
+# Dave's 2026-05-09 19:00 UTC smoke test). Try the older / more stable
+# slug first, fall through to the newer slug if Apify returns 404 or
+# similar "actor not found" conditions. First success wins.
+_APIFY_MAPS_ACTORS = (
+    "compass~crawler-google-places",      # original, widely used since 2020
+    "compass~google-maps-scraper",        # newer rebrand, may not exist
+    "compass~Google-Maps-Scraper",        # case-variant fallback
+)
 _APIFY_MAPS_TIMEOUT  = 120   # s — Maps actor cold-starts in 30-60s
 _APIFY_MAPS_RETRY_WAIT = 8
 
@@ -464,37 +474,68 @@ class GBPAuditor:
             "exportPlaceUrls":             False,
         }
 
-        url = (
-            f"https://api.apify.com/v2/acts/{_APIFY_MAPS_ACTOR}"
-            f"/run-sync-get-dataset-items?token={api_key}"
-        )
-
+        # Iterate the slug-fallback chain — Apify periodically renames or
+        # republishes the Compass Maps actors. On HTTP 404 (actor not found
+        # at this slug), advance to the next candidate; on a transient error
+        # (5xx, timeout, JSON parse), retry once with the same slug. First
+        # success wins. Per Dave 2026-05-09 19:00 UTC: GMG smoke saw HTTP
+        # 404 on the prior single-slug call — this fallback prevents a
+        # rebrand from killing the Tier 3 path.
         items: Optional[List[Dict]] = None
         last_exc: Optional[Exception] = None
         import time as _time
-        for attempt in (1, 2):
-            try:
-                req = urllib.request.Request(
-                    url,
-                    data=json.dumps(payload).encode("utf-8"),
-                    headers={"Content-Type": "application/json"},
-                    method="POST",
-                )
-                with urllib.request.urlopen(req, timeout=_APIFY_MAPS_TIMEOUT) as resp:
-                    items = json.loads(resp.read().decode("utf-8"))
-                log.info(
-                    "apify_maps: attempt %d → %d items for %r",
-                    attempt, len(items or []), query,
-                )
+
+        for actor_slug in _APIFY_MAPS_ACTORS:
+            url = (
+                f"https://api.apify.com/v2/acts/{actor_slug}"
+                f"/run-sync-get-dataset-items?token={api_key}"
+            )
+            slug_404 = False
+            for attempt in (1, 2):
+                try:
+                    req = urllib.request.Request(
+                        url,
+                        data=json.dumps(payload).encode("utf-8"),
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    with urllib.request.urlopen(req, timeout=_APIFY_MAPS_TIMEOUT) as resp:
+                        items = json.loads(resp.read().decode("utf-8"))
+                    log.info(
+                        "apify_maps: actor=%r attempt %d → %d items for %r",
+                        actor_slug, attempt, len(items or []), query,
+                    )
+                    break
+                except urllib.error.HTTPError as exc:
+                    last_exc = exc
+                    if exc.code == 404:
+                        # Wrong slug — don't retry, move to next slug.
+                        log.info(
+                            "apify_maps: actor=%r returned 404 — trying next slug",
+                            actor_slug,
+                        )
+                        slug_404 = True
+                        break
+                    log.warning(
+                        "apify_maps: actor=%r attempt %d HTTP %d for %r: %s",
+                        actor_slug, attempt, exc.code, query, exc,
+                    )
+                    if attempt == 1:
+                        _time.sleep(_APIFY_MAPS_RETRY_WAIT)
+                except Exception as exc:
+                    last_exc = exc
+                    log.warning(
+                        "apify_maps: actor=%r attempt %d failed for %r: %s",
+                        actor_slug, attempt, query, exc,
+                    )
+                    if attempt == 1:
+                        _time.sleep(_APIFY_MAPS_RETRY_WAIT)
+            # Outer slug-loop control: stop trying further slugs as soon as
+            # we got a successful response (items != None) OR a non-404
+            # error (auth issue, quota, etc. won't be fixed by another slug).
+            if items is not None or not slug_404:
                 break
-            except Exception as exc:
-                last_exc = exc
-                log.warning(
-                    "apify_maps: attempt %d failed for %r: %s",
-                    attempt, query, exc,
-                )
-                if attempt == 1:
-                    _time.sleep(_APIFY_MAPS_RETRY_WAIT)
+
         if not items:
             return
 
