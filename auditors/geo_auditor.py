@@ -716,17 +716,30 @@ class GEOAuditor:
             "media_mentions": self.site.get("has_media_mentions", False),
             "client_logos":   self.site.get("has_client_logos", False),
         }
-        known  = sum(1 for v in signals.values() if v is True)
-        absent = sum(1 for v in signals.values() if v is False)
+        # Stage 2 (Elliot Swift architecture brief, applied 2026-05-09):
+        # exclude cannot_verify signals from the E-E-A-T denominator. A
+        # signal that lives in an image badge or third-party widget the
+        # crawler couldn't read shouldn't punish the score by being counted
+        # as "verified absent".
+        cv_set = set(self.site.get("cannot_verify_signals") or [])
+        verifiable = {k: v for k, v in signals.items() if k not in cv_set}
+        known  = sum(1 for v in verifiable.values() if v is True)
+        absent = sum(1 for v in verifiable.values() if v is False)
         total  = known + absent
 
         issues, strengths = [], []
 
         if total == 0:
+            # All five signals are cannot_verify — neutral 50, not a penalty
+            # for what we couldn't measure.
             return {
                 "score": 50, "status": "unknown",
-                "detail": "E-E-A-T signals unverified.",
-                "issues": ["🟡 E-E-A-T signals not verified — add testimonials, case studies, and credentials to site"],
+                "detail": (
+                    "E-E-A-T signals could not be verified — every trust "
+                    "signal lives in a format the crawler can't parse "
+                    f"(cannot_verify={sorted(cv_set)})."
+                ),
+                "issues": [],   # Data Coverage page handles the framing
                 "strengths": [], "signals": signals,
             }
 
@@ -735,10 +748,7 @@ class GEOAuditor:
 
         if signals.get("testimonials"):
             strengths.append("✅ Client testimonials present — trust signal for AI systems")
-        else:
-            # Per Dave 2026-05-06: testimonials may live in image quotes /
-            # widgets we can't parse. Don't claim "no testimonials" when we
-            # can't confirm absence.
+        elif "testimonials" not in cv_set:
             issues.append(
                 "🟡 Testimonials not detected in crawled content — may exist "
                 "as image quotes or third-party review widgets the crawler "
@@ -748,7 +758,7 @@ class GEOAuditor:
 
         if signals.get("case_studies"):
             strengths.append("✅ Case studies present — AI systems prefer demonstrated results")
-        else:
+        elif "case_studies" not in cv_set:
             issues.append(
                 "🟡 Case studies not detected — add 1-2 outcome-focused "
                 "client stories (or surface existing ones if they live in "

@@ -387,6 +387,61 @@ def _merge_website_data(channel_data: dict, website_audit: dict, base_url: str =
     # Web3 content
     site["web3_content"] = _has("web3", "nft", "blockchain", "crypto", "defi", "dao")
 
+    # ── Stage 2 — cannot_verify per Elliot Swift's audit-integrity brief ──────
+    # When a user-content signal is absent in the crawled DOM, ask whether we
+    # could plausibly have detected it if it existed. Image-embedded badges,
+    # third-party review widgets, JS-hydrated press logos, and PDF case studies
+    # are routinely invisible to text + schema scans even on a perfectly
+    # rendered Apify crawl. For those signals, "absent in crawl" doesn't mean
+    # "absent on the site" — it means we genuinely couldn't check.
+    #
+    # Score calculators (aeo_auditor._score_trust_signals,
+    # geo_auditor's E-E-A-T component) consult this set and EXCLUDE
+    # cannot_verify signals from scoring rather than counting them as
+    # verified-absent. Net effect: the score reflects what we could measure,
+    # not a penalty for what we couldn't reach.
+    #
+    # Rules:
+    #   certifications, client_logos, media_mentions — almost always live as
+    #     image badges / logo grids / image-only press strips. Mark
+    #     cannot_verify whenever the keyword + Apify schema scan finds nothing.
+    #   testimonials, case_studies — verifiable when (a) Apify Review/AggregateRating
+    #     or CaseStudy schema is detected (positive signal — we trust it),
+    #     (b) named-attribution heuristic matched, or (c) URL slug match. If
+    #     none of those apply AND has_X is False, mark cannot_verify — the
+    #     content might exist in widgets / iframes / image quotes we can't read.
+    cannot_verify_signals: set = set()
+
+    # Image-only-typical signals: when not detected, assume cannot_verify.
+    if not site.get("has_certifications"):
+        cannot_verify_signals.add("certifications")
+    if not site.get("has_client_logos"):
+        cannot_verify_signals.add("client_logos")
+    if not site.get("has_media_mentions"):
+        cannot_verify_signals.add("media_mentions")
+
+    # Testimonials: only count as "verified absent" when we had positive
+    # confidence to look for them (schema or named-attribution would have
+    # surfaced them). Otherwise they could live in widgets we can't read.
+    _had_test_evidence = (
+        _apify_testimonials                           # Review / AggregateRating schema
+        or any(s in hp_schema_lc for s in ("review", "aggregaterating"))
+    )
+    if not site.get("has_testimonials") and not _had_test_evidence:
+        cannot_verify_signals.add("testimonials")
+
+    # Case studies: same — schema is the strong signal. URL slug is
+    # circumstantial. Without either + has_case_studies False → cannot_verify.
+    if not site.get("has_case_studies") and not _apify_case_studies:
+        cannot_verify_signals.add("case_studies")
+
+    site["cannot_verify_signals"] = cannot_verify_signals
+    if cannot_verify_signals:
+        log.info(
+            "cannot_verify signals (excluded from trust-signal scoring): %s",
+            sorted(cannot_verify_signals),
+        )
+
     # Platform detected by WebsiteAuditor during homepage parse
     site["platform"] = (website_audit.get("platform") or "unknown").lower()
 

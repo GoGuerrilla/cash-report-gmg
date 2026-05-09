@@ -523,11 +523,31 @@ class AEOAuditor:
             "media_mentions": bool(site.get("has_media_mentions")),
             "client_logos":   bool(site.get("has_client_logos")),
         }
-        present_count = sum(1 for v in signals.values() if v)
+        # Stage 2 (Elliot Swift architecture brief) — exclude cannot_verify
+        # signals from scoring. A signal is cannot_verify when it could
+        # plausibly exist on the site in a format our crawler couldn't
+        # parse (image badges, third-party widgets, JS-hydrated press
+        # strips). Counting it as "verified absent" punishes the operator
+        # for our crawl's blind spot.
+        cv_set = set(site.get("cannot_verify_signals") or [])
+        verifiable = {k: v for k, v in signals.items() if k not in cv_set}
 
-        # 0 → 30 (poor floor), 1 → 50, 2 → 65, 3 → 80, 4 → 90, 5 → 95
-        tiers = {0: 30, 1: 50, 2: 65, 3: 80, 4: 90, 5: 95}
-        score = tiers.get(present_count, 95)
+        if verifiable:
+            verified_present = sum(1 for v in verifiable.values() if v)
+            verified_total   = len(verifiable)
+            # Map fraction-present to the same 30-95 range the prior tier
+            # table used: 0% → 30, 100% → 95. Linear interpolation keeps
+            # the mid-range scores comparable to the old 5-signal tiers.
+            pct = verified_present / verified_total
+            score = round(30 + pct * 65)
+        else:
+            # Every trust signal is cannot_verify — we couldn't measure
+            # anything. Neutral 50 rather than punishing 30.
+            verified_present = 0
+            verified_total   = 0
+            score = 50
+
+        present_count = sum(1 for v in signals.values() if v)
 
         issues, strengths = [], []
         # Per Dave 2026-05-06: trust signals can live in image embeds,
@@ -537,7 +557,11 @@ class AEOAuditor:
         # to add the signal or just surface an existing one.
         if signals["testimonials"]:
             strengths.append("✅ Testimonials present — direct trust signal for AI citation")
-        else:
+        elif "testimonials" not in cv_set:
+            # Testimonials genuinely verified-absent: emit the soft 🟡.
+            # When in cv_set, suppress here — the Data Coverage page is the
+            # canonical "we couldn't reach this" surface and the score now
+            # correctly excludes the signal from the math.
             issues.append(
                 "🟡 Testimonials not detected in crawled content — may live "
                 "in image quotes or third-party review widgets we can't parse. "
@@ -545,7 +569,7 @@ class AEOAuditor:
             )
         if signals["case_studies"]:
             strengths.append("✅ Case studies present — outcome-focused content boosts AI trust")
-        else:
+        elif "case_studies" not in cv_set:
             issues.append(
                 "🟡 Case studies not detected — add 1-2 outcome stories as "
                 "plain-text pages for AEO depth (or surface existing ones if "
@@ -562,7 +586,11 @@ class AEOAuditor:
             "score":     score,
             "issues":    issues,
             "strengths": strengths,
-            "detail":    f"present={present_count}/5  signals={signals}",
+            "detail":    (
+                f"present={present_count}/5  "
+                f"verified={verified_present}/{verified_total}  "
+                f"cannot_verify={sorted(cv_set)}  signals={signals}"
+            ),
         }
 
 
