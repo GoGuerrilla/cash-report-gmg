@@ -346,7 +346,17 @@ def _classify_form(action: str, fields: List[str], btn: str) -> str:
 
 
 def _parse_forms(soup, page_url: str) -> List[Dict]:
-    """Extract form elements. Operates on full DOM — footer forms included."""
+    """Extract form elements. Operates on full DOM — footer forms included.
+
+    Per Dave 2026-05-10 (lead-magnet detection generalisation): each form
+    additionally carries `has_email_input` — True if any <input type="email">
+    is present. That's the strongest platform-agnostic "this is a lead
+    capture" signal — regardless of what the submit button says, a form
+    asking for an email IS a lead-capture funnel. This lets the
+    lead-magnet detector in website_auditor work on Wix / Squarespace /
+    Webflow / WordPress / custom React without keyword-matching button
+    text (which fails when the text is JS-hydrated post-render).
+    """
     forms = []
     for form in soup.find_all("form"):
         raw_action = form.get("action") or ""
@@ -357,8 +367,12 @@ def _parse_forms(soup, page_url: str) -> List[Dict]:
         )
 
         fields: List[str] = []
+        has_email_input = False
         for inp in form.find_all(["input", "textarea", "select"]):
-            if inp.get("type") in ("hidden", "submit", "button", "image", "reset"):
+            inp_type = (inp.get("type") or "").lower()
+            if inp_type == "email":
+                has_email_input = True
+            if inp_type in ("hidden", "submit", "button", "image", "reset"):
                 continue
             label = (
                 inp.get("placeholder")
@@ -381,12 +395,48 @@ def _parse_forms(soup, page_url: str) -> List[Dict]:
             )
 
         forms.append({
-            "action_url":  action,
-            "fields":      fields,
-            "button_text": btn_text,
-            "form_type":   _classify_form(action or "", fields, btn_text or ""),
+            "action_url":      action,
+            "fields":          fields,
+            "button_text":     btn_text,
+            "form_type":       _classify_form(action or "", fields, btn_text or ""),
+            "has_email_input": has_email_input,
         })
     return forms
+
+
+def _extract_downloadable_assets(soup) -> List[Dict]:
+    """
+    Per Dave 2026-05-10 (lead-magnet detection generalisation): scan every
+    anchor on the page for hrefs pointing at downloadable assets — PDFs,
+    eBooks, slide decks, spreadsheets. A link to a free PDF IS a lead
+    magnet regardless of what the surrounding button copy says, and this
+    detection works the same way on Wix, Squarespace, WordPress, custom
+    React, etc. — no platform-specific patterns required.
+
+    Returns: list of {'url': str, 'anchor': str|None}. Up to 10 per page.
+    """
+    asset_exts = (".pdf", ".zip", ".epub", ".docx", ".xlsx", ".pptx", ".csv")
+    assets: List[Dict] = []
+    seen: set = set()
+    for a in soup.find_all("a", href=True):
+        href = (a.get("href") or "").strip()
+        if not href:
+            continue
+        href_lc = href.lower()
+        # Strip query string before checking extension — many sites tack on
+        # tracking params like ?utm_source=...
+        path_only = href_lc.split("?", 1)[0].split("#", 1)[0]
+        if any(path_only.endswith(ext) for ext in asset_exts):
+            if href in seen:
+                continue
+            seen.add(href)
+            assets.append({
+                "url":    href,
+                "anchor": a.get_text(" ", strip=True) or None,
+            })
+            if len(assets) >= 10:
+                break
+    return assets
 
 
 def _infer_cta_location(element) -> str:
@@ -829,6 +879,10 @@ def fetch(base_url: str, sitemap_urls: Optional[List[str]] = None) -> Dict[str, 
                     for iframe in soup.find_all("iframe", src=True)
                     if iframe.get("src", "").strip()
                 ],
+                # Per Dave 2026-05-10: downloadable PDFs / eBooks / slide
+                # decks linked from the page. A free downloadable IS a
+                # lead magnet regardless of button copy — platform-agnostic.
+                "downloadable_assets": _extract_downloadable_assets(soup),
             })
 
     # Order hints by precedence so the first element is the primary platform

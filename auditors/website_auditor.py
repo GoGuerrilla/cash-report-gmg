@@ -236,9 +236,19 @@ def _adapt_apify_to_pages(apify_result: dict) -> List[Dict]:
 
         schema_types = [obj.get("@type", "") for obj in struct if obj.get("@type")]
 
-        # lead magnet — scan apify CTAs for href/text keyword matches
+        # Lead-magnet detection — three-tier, platform-agnostic.
+        # Per Dave 2026-05-10: stop relying on button-text keyword matching
+        # alone. Real-world sites use diverse copy ("Get My Free Marketing
+        # Audit", "Download the Guide", "Subscribe Now", "Get the Report")
+        # and Wix / Squarespace JS-hydrate the button text in ways our
+        # keyword set can't fully predict. Detect the underlying STRUCTURE
+        # instead — a downloadable asset link, an email-capture form, or
+        # a button whose copy still happens to match. First hit wins.
         lead_magnet_url = None
         lead_magnet_cta = None
+
+        # Tier 1 — keyword-matched CTA (existing path; works when Apify
+        # captured the button and the text matches our vocab).
         for cta in ctas:
             href_lc = (cta.get("href") or "").lower()
             text_lc = (cta.get("text") or "").lower()
@@ -249,6 +259,35 @@ def _adapt_apify_to_pages(apify_result: dict) -> List[Dict]:
             if not lead_magnet_url and any(kw in text_lc for kw in _LEAD_MAGNET_TEXT_KWS):
                 lead_magnet_url = (cta.get("href") or "").strip()
                 lead_magnet_cta = cta.get("text", "")
+
+        # Tier 2 — downloadable asset link. A href to a free PDF / eBook /
+        # slide deck IS a lead magnet, full stop. Works on every platform
+        # because the link is always a plain <a href="*.pdf"> regardless
+        # of the surrounding widget framework.
+        if not lead_magnet_url:
+            for asset in (page.get("downloadable_assets") or []):
+                if asset.get("url"):
+                    lead_magnet_url = asset["url"]
+                    lead_magnet_cta = (
+                        asset.get("anchor")
+                        or f"Download asset: {asset['url'].rsplit('/', 1)[-1]}"
+                    )
+                    break
+
+        # Tier 3 — form with email input. An <input type="email"> in a
+        # <form> means the page captures email addresses regardless of
+        # what the submit button says. This is the most platform-agnostic
+        # signal we have — Wix, Squarespace, WordPress, and plain HTML
+        # all use the same <input type="email"> element under the hood.
+        if not lead_magnet_url:
+            for form in forms:
+                if form.get("has_email_input"):
+                    lead_magnet_url = form.get("action_url") or "form"
+                    lead_magnet_cta = (
+                        form.get("button_text")
+                        or "Email signup form"
+                    )
+                    break
 
         int_links        = sum(1 for lk in all_links if lk.get("from_url") == url)
         has_phone        = bool(re.search(r'\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}', text))

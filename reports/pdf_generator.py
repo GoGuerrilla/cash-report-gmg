@@ -879,13 +879,29 @@ class PDFReportGenerator:
         # Website meta
         dq = web.get("data_quality", {})
         rel_score = dq.get("reliability_score", "—")
+        # Per Dave 2026-05-10: Load Time was rendering as "—" because the
+        # static crawl didn't time the request and Apify-based runs don't
+        # populate load_time_seconds. Fall back to PageSpeed's
+        # Largest Contentful Paint (LCP) when available — that's the
+        # nearest "page-load" metric Google reports, already formatted
+        # as "X.Xs" string in seo.core_web_vitals.
+        seo_data       = self.data.get("seo", {}) or {}
+        cwv            = seo_data.get("core_web_vitals", {}) or {}
+        lcp_display    = cwv.get("lcp") if cwv else None
+        if web.get("load_time_seconds") is not None:
+            load_time_str = f'{web.get("load_time_seconds")}s'
+        elif lcp_display and str(lcp_display).strip() not in ("", "—"):
+            load_time_str = (
+                f'{lcp_display} (LCP — Google synthetic test, '
+                f'real-user experience may differ)'
+            )
+        else:
+            load_time_str = "—"
+
         web_fields = "".join([
             _field("URL",      _h(web.get("url", self.config.website_url or "—"))),
             _field("HTTPS",    f'{_sdot("g")}Yes' if web.get("https_enabled") else f'{_sdot("r")}No'),
-            _field("Load Time", _h(
-                "—" if web.get("load_time_seconds") is None
-                else f'{web.get("load_time_seconds")}s'
-            )),
+            _field("Load Time", _h(load_time_str)),
             _field("Platform",  _h((web.get("platform") or "Unknown").title())),
             _field("Data Reliability", f'<span class="td-good">{rel_score}/100 — High reliability</span>'
                    if isinstance(rel_score, int) and rel_score >= 80 else _h(str(rel_score))),
