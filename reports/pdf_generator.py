@@ -927,6 +927,21 @@ class PDFReportGenerator:
         body = (
             f'{_section_hdr("C", "Content", "How fresh, consistent, and strategically distributed is the content?", c_score, c_grade)}'
             f'{_sub(f"SEO Health — {seo_score}/100 ({_grade(seo_score)})")}'
+            # Per Dave 2026-05-10: clarify the SEO score vs Performance score
+            # disconnect. The section is labelled "SEO HEALTH" but the issues
+            # list often shows a Performance score that LOOKS contradictory
+            # (e.g. SEO 100/100 + Performance 39/100). They're separate
+            # Lighthouse categories: SEO measures meta/markup/indexability,
+            # Performance measures load speed (LCP, TBT, CLS). A site can
+            # ace SEO and still be slow.
+            f'<div class="text-body" style="font-size:11px;'
+            f'color:rgba(255,255,255,.6);margin-top:-6px;margin-bottom:10px">'
+            f'<b>SEO score</b> measures meta tags, structured data, indexability, '
+            f'and crawlability — not page speed. <b>Performance score</b> '
+            f'(separate Lighthouse category, listed below if low) measures '
+            f'load speed (LCP, TBT, CLS). A site can ace SEO markup and '
+            f'still load slowly — the two are independent metrics.'
+            f'</div>'
             f'{_split_table(seo.get("issues", []), seo.get("strengths", []))}'
             f'{_sub("SEO Check Status")}'
             f'<table class="field-table"><tbody>{seo_fields}</tbody></table>'
