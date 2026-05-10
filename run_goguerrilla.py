@@ -450,6 +450,47 @@ def _merge_website_data(channel_data: dict, website_audit: dict, base_url: str =
     if not _lead_magnet_detected and _js_heavy:
         cannot_verify_signals.add("lead_magnet")
 
+    # Stage 2 v2 (Dave 2026-05-10 queue #2) — extend cannot_verify to
+    # the rest of the signals that hydrate via JS on Wix / Squarespace /
+    # Webflow / Shopify. Same logic as lead_magnet: when has_X is False
+    # AND the platform is JS-heavy AND we don't have a positive Apify
+    # schema/form-type confirmation, treat as unmeasured rather than
+    # verified-absent. Stops the AI synthesis from recommending the
+    # operator "build a contact form" / "add an email opt-in" / "create
+    # a pricing page" on sites where those almost certainly exist as
+    # JS-hydrated widgets.
+
+    # Email opt-in — strongest positive signal is Apify-classified
+    # opt-in form. Without it on a JS-heavy platform → cannot_verify.
+    if (not site.get("has_email_optin")
+            and _js_heavy
+            and not _apify_email_optin):
+        cannot_verify_signals.add("email_optin")
+
+    # Contact form — same pattern. Wix's contact widget often renders
+    # as a <div>-based pseudo-form invisible to our form walker.
+    if (not site.get("has_contact_form")
+            and _js_heavy
+            and not _apify_contact_form):
+        cannot_verify_signals.add("contact_form")
+
+    # Pricing — many service businesses render pricing as image / table
+    # widgets that our text scan misses. Mark cannot_verify on JS-heavy
+    # platforms when the keyword scan turned up nothing, so we don't
+    # recommend "add visible pricing" when the operator already has it
+    # in a Wix table block.
+    if not site.get("has_pricing") and _js_heavy:
+        cannot_verify_signals.add("pricing")
+
+    # Blog — when sitemap couldn't be fetched (sitemap_urls=[]) AND no
+    # blog signals detected via keyword/Apify, we genuinely don't know.
+    # When sitemap was fetched but had no blog URLs, that's a stronger
+    # "verified absent" signal so leave has_blog as False.
+    _had_sitemap = bool((website_audit.get("apify_blog_posts") or [])
+                        or apify_blog_posts)
+    if not site.get("has_blog") and not _had_sitemap and _js_heavy:
+        cannot_verify_signals.add("blog")
+
     site["cannot_verify_signals"] = cannot_verify_signals
     if cannot_verify_signals:
         log.info(

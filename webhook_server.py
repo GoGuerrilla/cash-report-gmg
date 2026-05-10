@@ -506,8 +506,18 @@ def _stage4_verify(audit_data: dict) -> None:
         "client_logos":   ["no client logo", "add client logo", "missing logo"],
         "media_mentions": ["no media mention", "add media", "no press"],
         "lead_magnet":    ["no lead magnet", "add a lead magnet", "create a lead magnet",
-                           "missing lead magnet", "build a lead magnet",
-                           "no opt-in", "no email capture", "missing email capture"],
+                           "missing lead magnet", "build a lead magnet"],
+        # Stage 2 v2 signals (Dave 2026-05-10 queue #2). Phrasing reflects
+        # how the AI tends to describe absence of these on JS-heavy sites.
+        "email_optin":    ["no email opt-in", "no opt-in form", "add an opt-in",
+                           "missing email capture", "no email capture",
+                           "create an opt-in", "build an email"],
+        "contact_form":   ["no contact form", "add a contact form",
+                           "missing contact form", "create a contact form"],
+        "pricing":        ["no visible pricing", "add visible pricing",
+                           "missing pricing", "show pricing", "publish pricing"],
+        "blog":           ["no blog", "add a blog", "start a blog",
+                           "create a blog", "missing blog"],
     }
 
     # Fields to scan — synthesis output where contradictions would show.
