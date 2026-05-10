@@ -357,29 +357,69 @@ class WebsiteAuditor:
             results["https_enabled"] = final_url.startswith("https")
 
         # ── Step 1: Crawl target pages ───────────────────────
+        # Per Dave 2026-05-10 (Apify cost reduction): when USE_APIFY_CONTENT=1,
+        # try a free static fetch FIRST. If the static result is rich enough
+        # (no JS-platform fingerprint detected + homepage has title + meta +
+        # H1 + schema + ≥300 words of body text), skip Apify entirely. Only
+        # escalate to Apify when the static probe is genuinely sparse — this
+        # is the "JS shell" case (Wix / Squarespace / Webflow / client-side
+        # React) where static HTML is mostly empty until JS hydration runs.
+        # Saves 40-60% of Apify cost on WordPress / static / SSR-React sites.
+        # Override with APIFY_FORCE=1 env var for debugging.
         if os.environ.get("USE_APIFY_CONTENT", "").strip() == "1":
-            from auditors import apify_content
-            # Parse sitemap.xml to feed all declared URLs into the Apify start
-            # set. Without this, the actor only crawls the homepage + the
-            # _PRIORITY_GROUPS hard-coded path patterns, which miss sites with
-            # custom slugs like /about-elliot, /educate, /pca (Swift Profit
-            # Systems beta feedback 2026-05-05).
-            sitemap_urls = _fetch_sitemap_urls(self.base_url)
-            if sitemap_urls:
-                log.info("Sitemap fetch: %d URLs found for %s", len(sitemap_urls), self.base_url)
-            apify_result  = apify_content.fetch(self.base_url, sitemap_urls=sitemap_urls)
-            self.platform = (apify_result.get("platform_hints") or ["unknown"])[0]
-            pages_data    = _adapt_apify_to_pages(apify_result)
-            # Push 4 sanity check — preserve blog_posts (with published dates)
-            # so _merge_website_data can verify blog freshness against keyword scan.
-            results["apify_blog_posts"] = apify_result.get("blog_posts", [])
-            log.info(
-                "[APIFY_CONTENT_ON] base_url=%s pages=%d blog_posts=%d "
-                "platform_hints=%s data_source=apify_content_crawler",
-                self.base_url, len(pages_data),
-                len(apify_result.get("blog_posts", [])),
-                apify_result.get("platform_hints", []),
-            )
+            apify_force = os.environ.get("APIFY_FORCE", "").strip() == "1"
+            static_pages_data = None
+            static_sufficient = False
+
+            if not apify_force:
+                try:
+                    static_pages_data = self._crawl_target_pages(
+                        results, cached_html=html, cached_status=status
+                    )
+                    static_sufficient = self._is_static_sufficient(
+                        static_pages_data, homepage_html=html or ""
+                    )
+                except Exception as exc:
+                    log.warning(
+                        "static-first probe failed: %s — escalating to Apify", exc
+                    )
+                    static_pages_data = None
+                    static_sufficient = False
+
+            if static_sufficient and not apify_force:
+                # Static fetch was rich enough — skip Apify entirely.
+                pages_data    = static_pages_data
+                self.platform = (results.get("platform")
+                                 or (static_pages_data[0].get("platform") if static_pages_data else "unknown"))
+                log.info(
+                    "[STATIC_FIRST] base_url=%s pages=%d  Apify skipped "
+                    "(saves ~$0.10-0.20)",
+                    self.base_url, len(pages_data),
+                )
+            else:
+                # Static probe sparse OR APIFY_FORCE=1 — escalate to Apify.
+                from auditors import apify_content
+                # Parse sitemap.xml to feed all declared URLs into the Apify start
+                # set. Without this, the actor only crawls the homepage + the
+                # _PRIORITY_GROUPS hard-coded path patterns, which miss sites with
+                # custom slugs like /about-elliot, /educate, /pca (Swift Profit
+                # Systems beta feedback 2026-05-05).
+                sitemap_urls = _fetch_sitemap_urls(self.base_url)
+                if sitemap_urls:
+                    log.info("Sitemap fetch: %d URLs found for %s", len(sitemap_urls), self.base_url)
+                apify_result  = apify_content.fetch(self.base_url, sitemap_urls=sitemap_urls)
+                self.platform = (apify_result.get("platform_hints") or ["unknown"])[0]
+                pages_data    = _adapt_apify_to_pages(apify_result)
+                # Push 4 sanity check — preserve blog_posts (with published dates)
+                # so _merge_website_data can verify blog freshness against keyword scan.
+                results["apify_blog_posts"] = apify_result.get("blog_posts", [])
+                log.info(
+                    "[APIFY_CONTENT_ON] base_url=%s pages=%d blog_posts=%d "
+                    "platform_hints=%s data_source=apify_content_crawler",
+                    self.base_url, len(pages_data),
+                    len(apify_result.get("blog_posts", [])),
+                    apify_result.get("platform_hints", []),
+                )
         else:
             try:
                 pages_data = self._crawl_target_pages(results, cached_html=html,
@@ -422,6 +462,71 @@ class WebsiteAuditor:
         results["strengths"] = self._detect_strengths(results)
         self._attach_data_quality(results, redirects_resolved)
         return results
+
+    # ─────────────────────────────────────────────────────────────
+    #  Static-fetch-first probe (Dave 2026-05-10 — Apify cost cut)
+    # ─────────────────────────────────────────────────────────────
+
+    def _is_static_sufficient(
+        self,
+        pages_data: Optional[List[Dict]],
+        homepage_html: str = "",
+    ) -> bool:
+        """
+        Decide whether a static fetch is rich enough to skip Apify.
+
+        The bar is intentionally strict — false positives (saying "static is
+        sufficient" when it isn't) ship sparse reports, which is worse than
+        spending an extra $0.10 on an Apify call. False negatives (always
+        falling back to Apify) just means no cost saving, status quo.
+
+        Returns True only when ALL of:
+          - pages_data is non-empty and the homepage page exists
+          - The homepage HTML carries no Wix / Squarespace / Webflow /
+            Shopify fingerprint (those platforms are JS-hydrated; static
+            fetch returns a near-empty shell)
+          - Homepage has title + meta description + ≥1 H1 + ≥1 schema
+            block + ≥300 words of body text
+
+        Logs the verdict so we can confirm in Railway which audits skipped
+        Apify and which escalated.
+        """
+        if not pages_data:
+            return False
+        hp = pages_data[0] if pages_data else None
+        if not hp:
+            return False
+
+        # Platform fingerprint check — JS-heavy platforms always escalate.
+        if homepage_html:
+            from auditors.apify_content import _detect_platform_hints
+            hints = set(_detect_platform_hints(homepage_html))
+            js_heavy = hints & {"wix", "squarespace", "webflow", "shopify"}
+            if js_heavy:
+                log.info(
+                    "[STATIC_FIRST] %s platform detected — escalating to Apify "
+                    "(static HTML would be a JS shell)",
+                    sorted(js_heavy),
+                )
+                return False
+
+        # Content-richness check — homepage must look complete in static HTML.
+        has_title  = bool(hp.get("title"))
+        vs         = hp.get("validation_states", {}) or {}
+        has_meta   = (vs.get("meta") == "found"
+                      or bool(hp.get("meta_description")))
+        has_h1     = (hp.get("h1_count", 0) or 0) >= 1
+        has_schema = bool(hp.get("schema_types") or hp.get("has_schema_markup"))
+        wc         = hp.get("word_count", 0) or 0
+        has_body   = wc >= 300
+
+        sufficient = all((has_title, has_meta, has_h1, has_schema, has_body))
+        log.info(
+            "[STATIC_FIRST] probe: title=%s meta=%s h1=%s schema=%s "
+            "words=%d → sufficient=%s",
+            has_title, has_meta, has_h1, has_schema, wc, sufficient,
+        )
+        return sufficient
 
     # ─────────────────────────────────────────────────────────────
     #  Target page discovery and crawling
