@@ -590,6 +590,25 @@ MINDSET CHECK — before finalizing each field, ask:
   4. Is this actionable (specific lever) or just descriptive?
 If any answer is no, rewrite the field.
 
+UNMEASURED-SIGNAL DIRECTIVE (Stage 2 / cannot_verify) — when the
+"UNMEASURED SIGNALS" block in the per-client data lists a signal,
+that signal could NOT be reliably checked by our crawler. The most
+common reasons are image-only badges (certifications, client logos,
+press strips), JS-hydrated widgets (Wix / Squarespace email signup
+forms, lead-magnet popups), and content embedded in third-party
+iframes. For ANY signal in that list:
+  ❌ Do NOT recommend "add a [signal]" / "create a [signal]" / "ADD A
+     LEAD MAGNET" — we don't know they're missing.
+  ❌ Do NOT label the signal absence as a "CRITICAL" gap or include
+     it in top_3_priorities or biggest_waste.
+  ✅ DO recommend the operator verify the signal manually, or surface
+     it as plain text on the homepage if it exists in a widget.
+  ✅ DO use the phrase "verify" / "confirm" / "surface" rather than
+     "create" / "add" / "build".
+This rule is non-negotiable — it's the report's integrity layer.
+Recommending the operator build something we couldn't confirm is
+missing is the failure mode this directive exists to prevent.
+
 CLIENT: {config.client_name}
 INDUSTRY: {config.client_industry}
 INDUSTRY CATEGORY: {config.industry_category or "Other"}
@@ -672,6 +691,9 @@ TOP ISSUES FOUND (real audit findings — use these to drive your recommendation
 
 TOP STRENGTHS FOUND:
 {chr(10).join(f"  {s}" for s in all_strengths[:15])}
+
+UNMEASURED SIGNALS (could not be reliably verified by our crawler — DO NOT recommend "add" / "create" for any of these; recommend "verify" / "surface" instead):
+{(chr(10).join(f"  - {s}" for s in sorted(audit_data.get("website", {}).get("cannot_verify_signals") or [])) if audit_data.get("website", {}).get("cannot_verify_signals") else "  (none — every audited signal was either verified-present or verified-absent)")}
 
 Respond with ONLY this exact JSON (no markdown fences, no extra keys):
 {{
