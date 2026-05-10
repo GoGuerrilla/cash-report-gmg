@@ -274,11 +274,13 @@ def _adapt_apify_to_pages(apify_result: dict) -> List[Dict]:
                     )
                     break
 
-        # Tier 3 — form with email input. An <input type="email"> in a
-        # <form> means the page captures email addresses regardless of
-        # what the submit button says. This is the most platform-agnostic
-        # signal we have — Wix, Squarespace, WordPress, and plain HTML
-        # all use the same <input type="email"> element under the hood.
+        # Tier 3 — form with email input. An email-capture field inside
+        # any <form> means the page captures email addresses regardless
+        # of what the submit button says. The detection in apify_content.
+        # _input_signals_email accepts type="email", name/placeholder/
+        # aria-label containing "email", and Wix-style data-hook patterns
+        # — so this fires across Wix, Squarespace, WordPress, plain HTML,
+        # and custom React.
         if not lead_magnet_url:
             for form in forms:
                 if form.get("has_email_input"):
@@ -288,6 +290,18 @@ def _adapt_apify_to_pages(apify_result: dict) -> List[Dict]:
                         or "Email signup form"
                     )
                     break
+
+        # Tier 4 — standalone email input (no <form> wrapper). Wix and
+        # Squarespace JS-hydrate signup widgets as <div>-based pseudo-
+        # forms that don't expose a semantic <form>. The <input> still
+        # carries email-signal attributes and is detectable on its own.
+        # Per Dave 2026-05-10: this is the layer that closes the GMG case
+        # where the homepage email signup never registered as a lead
+        # magnet because the keyword-CTA tier missed the button and the
+        # form-tier missed the wrapper.
+        if not lead_magnet_url and page.get("has_standalone_email_input"):
+            lead_magnet_url = "standalone_email_input"
+            lead_magnet_cta = "Email signup widget"
 
         int_links        = sum(1 for lk in all_links if lk.get("from_url") == url)
         has_phone        = bool(re.search(r'\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}', text))

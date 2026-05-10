@@ -435,6 +435,21 @@ def _merge_website_data(channel_data: dict, website_audit: dict, base_url: str =
     if not site.get("has_case_studies") and not _apify_case_studies:
         cannot_verify_signals.add("case_studies")
 
+    # Lead magnet — per Dave 2026-05-10 (GMG smoke). When we found NO
+    # signal at any of the four detection tiers (keyword-CTA / asset
+    # link / email-form / standalone email input) AND the platform is
+    # JS-heavy (Wix / Squarespace / Webflow / Shopify), the most likely
+    # explanation is that the lead-capture widget hydrates in a way our
+    # crawler can't reach — not that the operator has no opt-in. Mark
+    # cannot_verify so the report doesn't fire a CRITICAL recommendation
+    # to "ADD A LEAD MAGNET" when one might already exist.
+    homepage_data = website_audit.get("homepage", {}) or {}
+    _platform_lc = (website_audit.get("platform") or "").lower()
+    _js_heavy = _platform_lc in ("wix", "squarespace", "webflow", "shopify")
+    _lead_magnet_detected = bool(homepage_data.get("lead_magnet_url"))
+    if not _lead_magnet_detected and _js_heavy:
+        cannot_verify_signals.add("lead_magnet")
+
     site["cannot_verify_signals"] = cannot_verify_signals
     if cannot_verify_signals:
         log.info(

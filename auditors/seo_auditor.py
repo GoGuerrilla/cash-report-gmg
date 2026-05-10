@@ -741,12 +741,27 @@ class SEOAuditor:
         else:
             issues.append(f"🔴 Low Lighthouse SEO score: {seo_score}/100")
 
+        # Per Dave 2026-05-10: PageSpeed v5 returns Lighthouse synthetic
+        # scores from a deliberately-pessimistic emulated mobile / slow-4G
+        # test environment. Real-user experience on desktop fiber is
+        # dramatically faster (Dave's GMG reads "39/100" while loading
+        # near-instant in his actual browser). Append the framing to every
+        # Performance-score finding so the operator knows the number is
+        # synthetic, not their browser.
+        _perf_caveat = (
+            " (Google synthetic mobile/slow-4G test — real-user "
+            "desktop experience typically faster; connect Google "
+            "Search Console for real-user CrUX field data)"
+        )
         if perf_score >= 65:
-            strengths.append(f"✅ Performance score: {perf_score}/100")
+            strengths.append(f"✅ Performance score: {perf_score}/100{_perf_caveat}")
         elif perf_score >= 35:
-            issues.append(f"🟡 Performance score: {perf_score}/100")
+            issues.append(f"🟡 Performance score: {perf_score}/100{_perf_caveat}")
         else:
-            issues.append(f"🔴 Poor performance score: {perf_score}/100 — hurts Core Web Vitals ranking")
+            issues.append(
+                f"🔴 Poor performance score: {perf_score}/100 — hurts "
+                f"Core Web Vitals ranking{_perf_caveat}"
+            )
 
         audit_labels = {
             "robots-txt":       ("🟡 Missing robots.txt",          "✅ robots.txt present"),

@@ -345,6 +345,50 @@ def _classify_form(action: str, fields: List[str], btn: str) -> str:
     return "other"
 
 
+def _input_signals_email(inp) -> bool:
+    """
+    True if an <input> looks like an email-capture field — by type, name,
+    placeholder, aria-label, or autocomplete attribute. Per Dave 2026-05-10:
+    Wix / Squarespace / Webflow ship semantic <input type="text"> with
+    email signals hidden in non-type attributes, so a strict type=="email"
+    check misses every JS-heavy site builder.
+    """
+    if not hasattr(inp, "get"):
+        return False
+    if (inp.get("type") or "").lower() == "email":
+        return True
+    ac = (inp.get("autocomplete") or "").lower()
+    if "email" in ac:
+        return True
+    haystack = " ".join([
+        (inp.get("name") or "").lower(),
+        (inp.get("placeholder") or "").lower(),
+        (inp.get("aria-label") or "").lower(),
+        (inp.get("id") or "").lower(),
+        # Wix-specific data hooks for form widgets sometimes include
+        # the field intent in the data-hook attribute.
+        (inp.get("data-hook") or "").lower(),
+        " ".join((inp.get("class") or [])).lower()
+            if isinstance(inp.get("class"), list) else "",
+    ])
+    return "email" in haystack or "e-mail" in haystack
+
+
+def _has_standalone_email_input(soup) -> bool:
+    """
+    True if ANY <input> on the page signals email capture, regardless of
+    whether it's inside a <form>. Per Dave 2026-05-10: Wix / Squarespace
+    JS-hydrated signup widgets sometimes render the input + submit
+    handler as a <div>-based pseudo-form with no semantic <form> wrapper
+    — the email <input> still exists in the rendered DOM but our
+    form-walker misses it. Catch it here.
+    """
+    for inp in soup.find_all("input"):
+        if _input_signals_email(inp):
+            return True
+    return False
+
+
 def _parse_forms(soup, page_url: str) -> List[Dict]:
     """Extract form elements. Operates on full DOM — footer forms included.
 
@@ -370,7 +414,12 @@ def _parse_forms(soup, page_url: str) -> List[Dict]:
         has_email_input = False
         for inp in form.find_all(["input", "textarea", "select"]):
             inp_type = (inp.get("type") or "").lower()
-            if inp_type == "email":
+            # Per Dave 2026-05-10 (GMG smoke): Wix / Squarespace / Webflow
+            # render email signup inputs as <input type="text"> with the
+            # email signal hiding in name / placeholder / aria-label rather
+            # than the semantic type="email". Loosen detection so any input
+            # whose name/placeholder/aria-label contains "email" counts.
+            if _input_signals_email(inp):
                 has_email_input = True
             if inp_type in ("hidden", "submit", "button", "image", "reset"):
                 continue
@@ -883,6 +932,11 @@ def fetch(base_url: str, sitemap_urls: Optional[List[str]] = None) -> Dict[str, 
                 # decks linked from the page. A free downloadable IS a
                 # lead magnet regardless of button copy — platform-agnostic.
                 "downloadable_assets": _extract_downloadable_assets(soup),
+                # Per Dave 2026-05-10: standalone email-input check —
+                # catches Wix / Squarespace JS-hydrated signup widgets
+                # where the <form> tag isn't semantic but the <input>
+                # still carries email-signal attributes.
+                "has_standalone_email_input": _has_standalone_email_input(soup),
             })
 
     # Order hints by precedence so the first element is the primary platform

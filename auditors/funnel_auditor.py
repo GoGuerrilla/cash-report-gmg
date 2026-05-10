@@ -87,9 +87,27 @@ class FunnelAuditor:
         has_contact_form    = preloaded.get("website", {}).get("has_contact_form", False)
         booking_url         = preloaded.get("website", {}).get("booking_url", "")
         email               = self.linktree.get("email", "")
+        # Per Dave 2026-05-10: respect Stage 2 cannot_verify for lead_magnet.
+        # On JS-heavy platforms (Wix / Squarespace / Webflow) a missing
+        # detection often means the widget is hydrated in a way our crawler
+        # can't reach — not that the operator lacks an opt-in. Suppress the
+        # 🔴 CRITICAL "no lead magnet" finding when we genuinely couldn't
+        # verify; the Data Coverage page surfaces the gap honestly.
+        _cv_set             = set(preloaded.get("website", {}).get("cannot_verify_signals") or [])
+        _lead_magnet_cv     = "lead_magnet" in _cv_set
 
         if has_lead_magnet:
             strengths.append("✅ Lead magnet present on website.")
+        elif _lead_magnet_cv:
+            issues.append(
+                "🟡 Lead magnet not detected in crawled content — but the "
+                "JS-heavy platform we detected (Wix / Squarespace / Webflow) "
+                "renders signup widgets via JavaScript hydration that our "
+                "crawler can't fully reach. If you have a lead magnet, "
+                "verify it appears in the page source as plain HTML. If "
+                "you don't, add one — but don't take this finding as "
+                "confirmation either way."
+            )
         else:
             issues.append(
                 "🔴 No lead magnet found. Cold visitors need a low-risk first step "
@@ -99,6 +117,14 @@ class FunnelAuditor:
 
         if has_email_optin:
             strengths.append("✅ Email opt-in found — top of funnel capture in place.")
+        elif _lead_magnet_cv:
+            # Same logic: when lead_magnet is cannot_verify, the email-
+            # opt-in detection is also unreliable on the same JS shells.
+            issues.append(
+                "🟡 Email opt-in form not detected — same JS-rendering "
+                "limitation as the lead magnet finding above. Verify "
+                "manually before treating as a definitive gap."
+            )
         else:
             issues.append(
                 "🔴 No visible email opt-in/capture form. Email marketing typically yields ~42:1 ROI "
