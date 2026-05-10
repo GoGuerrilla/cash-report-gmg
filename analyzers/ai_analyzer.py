@@ -248,12 +248,53 @@ class AIAnalyzer:
 
         client = anthropic.Anthropic(api_key=self.anthropic_key)
         prompt = self._build_prompt(config, audit_data)
+
+        # Anthropic prompt caching (Dave 2026-05-09 — token-frugality push).
+        # Split the prompt at the first "CLIENT: " line — everything before
+        # is the static directives block (audience guidance, length caps,
+        # forbidden phrases, mindset check) which is invariant across audits.
+        # Mark it cache_control=ephemeral so subsequent audits within the
+        # 5-minute cache window pay ~10% of input-token cost on that ~1.2k-
+        # token block. The per-client data after the anchor is sent as the
+        # user message and pays full cost (it varies every call).
+        anchor = "\n\nCLIENT: "
+        if anchor in prompt:
+            static_prefix, variable_data = prompt.split(anchor, 1)
+            variable_data = "CLIENT: " + variable_data
+            messages_kwargs = {
+                "model":      "claude-sonnet-4-6",
+                "max_tokens": 4096,
+                "system":     [{
+                    "type":          "text",
+                    "text":          static_prefix,
+                    "cache_control": {"type": "ephemeral"},
+                }],
+                "messages":   [{"role": "user", "content": variable_data}],
+            }
+        else:
+            # Anchor missing (prompt schema changed) — fall back to single-
+            # message form so the audit doesn't break. Logged so we notice.
+            print("   ⚠️  Claude prompt cache anchor missing — falling back to single message")
+            messages_kwargs = {
+                "model":      "claude-sonnet-4-6",
+                "max_tokens": 4096,
+                "messages":   [{"role": "user", "content": prompt}],
+            }
+
         try:
-            message = client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=4096,
-                messages=[{"role": "user", "content": prompt}]
-            )
+            message = client.messages.create(**messages_kwargs)
+            # Surface cache stats so we can confirm in Railway logs that the
+            # cache is hitting (cache_read_input_tokens > 0 on subsequent
+            # audits within the 5-min window).
+            usage = getattr(message, "usage", None)
+            if usage:
+                cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+                cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
+                print(
+                    f"   Claude tokens: input={getattr(usage, 'input_tokens', 0)} "
+                    f"output={getattr(usage, 'output_tokens', 0)} "
+                    f"cache_write={cache_write} cache_read={cache_read}"
+                )
             result = self._parse_ai_response(message.content[0].text)
             return result
         except Exception as e:
