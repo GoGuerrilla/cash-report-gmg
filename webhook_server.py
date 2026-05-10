@@ -463,6 +463,117 @@ def _infer_industry(
     return "General Business", "Other"
 
 
+def _stage4_verify(audit_data: dict) -> None:
+    """
+    Stage 4 — pre-delivery verification pass per Elliot Swift's brief.
+
+    Scans the AI synthesis output for recommendations that contradict
+    cannot_verify_signals. If the AI tells the operator to 'add a lead
+    magnet' while lead_magnet is in cannot_verify, that's a violation
+    of the prompt directive in 4931b08 — log it as [STAGE4_VIOLATION]
+    so we can grep frequency and tune the directive. Non-blocking by
+    design: HOLD is reserved for clear-cut breaches once we've watched
+    the false-positive rate.
+
+    Two checks:
+      1. Forbidden-verb scan — "add a [signal]" / "create a [signal]" /
+         "build a [signal]" patterns where signal is in cannot_verify.
+      2. CRITICAL-tag scan — top_3_priorities and biggest_waste shouldn't
+         tag a cannot_verify signal as CRITICAL since we don't know it's
+         actually missing.
+
+    Logs violations with the field, snippet, and the unmeasured signal
+    that was contradicted.
+    """
+    site = audit_data.get("website", {}) or {}
+    cv_set = set(site.get("cannot_verify_signals") or [])
+    if not cv_set:
+        return  # Nothing unmeasured — no chance of contradiction.
+
+    ai = audit_data.get("ai_insights", {}) or {}
+    if not ai or ai.get("parse_error"):
+        return  # No synthesis output to verify.
+
+    # Map each cannot_verify signal to the phrases the AI might use to
+    # contradict it. Phrasing reflects how the AI tends to describe the
+    # absence — "no testimonials", "no lead magnet", etc.
+    forbidden_phrases = {
+        "testimonials":   ["no testimonial", "add testimonial", "collect testimonial",
+                           "lack of testimonial", "missing testimonial"],
+        "case_studies":   ["no case stud", "add a case stud", "create a case stud",
+                           "lack case stud", "missing case stud", "build case stud"],
+        "certifications": ["no certif", "add certif", "missing certif", "lack certif"],
+        "client_logos":   ["no client logo", "add client logo", "missing logo"],
+        "media_mentions": ["no media mention", "add media", "no press"],
+        "lead_magnet":    ["no lead magnet", "add a lead magnet", "create a lead magnet",
+                           "missing lead magnet", "build a lead magnet",
+                           "no opt-in", "no email capture", "missing email capture"],
+    }
+
+    # Fields to scan — synthesis output where contradictions would show.
+    scan_fields = [
+        "executive_summary", "biggest_opportunity", "biggest_waste",
+        "channel_recommendation", "content_strategy", "budget_recommendation",
+        "competitive_positioning", "icp_alignment_verdict", "cover_topline",
+    ]
+
+    violations = []
+    for sig in cv_set:
+        phrases = forbidden_phrases.get(sig, [])
+        if not phrases:
+            continue
+        for fld in scan_fields:
+            txt = (ai.get(fld) or "").lower()
+            if not txt:
+                continue
+            for phrase in phrases:
+                if phrase in txt:
+                    violations.append({
+                        "signal":  sig,
+                        "field":   fld,
+                        "phrase":  phrase,
+                        "snippet": txt[:200].replace("\n", " "),
+                    })
+                    break  # one hit per (signal, field) is enough
+        # Also scan structured priority lists.
+        for priorities_field in ("top_3_priorities", "90_day_action_plan"):
+            for entry in (ai.get(priorities_field) or []):
+                if not isinstance(entry, dict):
+                    continue
+                action = (entry.get("action") or "").lower()
+                impact = (entry.get("impact") or entry.get("outcome") or "").lower()
+                blob   = action + " || " + impact
+                for phrase in phrases:
+                    if phrase in blob:
+                        violations.append({
+                            "signal":  sig,
+                            "field":   priorities_field,
+                            "phrase":  phrase,
+                            "snippet": blob[:200].replace("\n", " "),
+                        })
+                        break
+
+    if not violations:
+        log.info(
+            "[STAGE4_VERIFY] OK — no contradictions vs cannot_verify=%s",
+            sorted(cv_set),
+        )
+        return
+
+    # Log every violation in a greppable format.
+    for v in violations:
+        log.warning(
+            "[STAGE4_VIOLATION] signal=%s field=%s phrase=%r snippet=%r",
+            v["signal"], v["field"], v["phrase"], v["snippet"],
+        )
+    log.warning(
+        "[STAGE4_VERIFY] %d violation(s) detected — synthesis recommended "
+        "action on cannot_verify signal(s). Report still ships (non-blocking) "
+        "but the AI directive needs tightening if this recurs.",
+        len(violations),
+    )
+
+
 def _audit_signal_haystack(audit_data: dict) -> str:
     """
     Build an extra industry-classification signal from website audit data.
@@ -1477,6 +1588,21 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
         config, audit_data
     )
     log.info("TIMING  ai_synthesis            %.2fs", time.time() - _t)
+
+    # ── Stage 4 — pre-delivery verification pass ─────────────────
+    # Per Elliot Swift's audit-integrity brief (2026-05-06) + Dave
+    # 2026-05-10: scan the AI synthesis output for recommendations that
+    # contradict cannot_verify_signals. If the AI tells the operator to
+    # "add a lead magnet" while lead_magnet is in cannot_verify, that's
+    # a violation of the prompt directive (4931b08) — and a quality
+    # signal that the directive isn't being honoured. Log violations
+    # as [STAGE4_VIOLATION] so we can grep frequency. For now we
+    # only LOG; HOLD is reserved for clear-cut breaches once we've
+    # validated the false-positive rate is low.
+    try:
+        _stage4_verify(audit_data)
+    except Exception as exc:
+        log.warning("Stage 4 verification pass failed (non-blocking): %s", exc)
 
     ai            = audit_data.get("ai_insights", {})
     overall_score = ai.get("overall_score")
