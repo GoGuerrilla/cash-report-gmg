@@ -306,11 +306,68 @@ def _clean(text: str) -> str:
     ).strip()
 
 
+def _finding_badge(severity_text: str, kind: str = "issue") -> str:
+    """
+    Per-finding confidence badge — rendered inline before each issue or
+    strength so the reader can tell at a glance whether the finding is
+    verified, soft (not-detected-could-exist), or a strength. Per Dave
+    2026-05-10 queue item #4: visible integrity layer for the operator
+    and the client.
+
+    Mapping:
+      🔴 → "VERIFIED GAP"   (red)   — gap confirmed by detection
+      🟡 → "NOT DETECTED"   (amber) — could not verify, may exist in
+                                       widget/image/JS-rendered DOM
+      🔵 → "UNVERIFIED"     (blue)  — explicit "unable to verify" prefix
+      ✓  → "VERIFIED"       (green) — strength was directly observed
+    """
+    base = (
+        'display:inline-block;padding:1px 6px;margin-right:6px;'
+        'border-radius:3px;font-size:8.5px;font-weight:700;'
+        'letter-spacing:0.4px;text-transform:uppercase;'
+        'vertical-align:1px;line-height:1.4'
+    )
+    if kind == "strength":
+        return (
+            f'<span style="{base};background:rgba(46,204,113,.18);'
+            f'color:#2ecc71;border:1px solid rgba(46,204,113,.4)">VERIFIED</span>'
+        )
+    s = severity_text or ""
+    if "🔴" in s:
+        return (
+            f'<span style="{base};background:rgba(255,80,80,.18);'
+            f'color:#ff7b7b;border:1px solid rgba(255,80,80,.4)">VERIFIED GAP</span>'
+        )
+    if "🟡" in s:
+        return (
+            f'<span style="{base};background:rgba(255,193,7,.18);'
+            f'color:#ffc107;border:1px solid rgba(255,193,7,.4)">NOT DETECTED</span>'
+        )
+    if "🔵" in s:
+        return (
+            f'<span style="{base};background:rgba(0,174,239,.18);'
+            f'color:#00aeef;border:1px solid rgba(0,174,239,.4)">UNVERIFIED</span>'
+        )
+    return ""
+
+
 def _split_row(issue: str, strength: str) -> str:
-    i_td = (f'<td class="col-issues"><span class="bullet">■</span>{_h(_clean(issue))}</td>'
-            if issue else '<td class="col-issues"></td>')
-    s_td = (f'<td class="col-strengths"><span class="bullet">✓</span>{_h(_clean(strength))}</td>'
-            if strength else '<td class="col-strengths"></td>')
+    if issue:
+        badge = _finding_badge(issue, kind="issue")
+        i_td  = (
+            f'<td class="col-issues"><span class="bullet">■</span>'
+            f'{badge}{_h(_clean(issue))}</td>'
+        )
+    else:
+        i_td = '<td class="col-issues"></td>'
+    if strength:
+        badge = _finding_badge(strength, kind="strength")
+        s_td  = (
+            f'<td class="col-strengths"><span class="bullet">✓</span>'
+            f'{badge}{_h(_clean(strength))}</td>'
+        )
+    else:
+        s_td = '<td class="col-strengths"></td>'
     return f"<tr>{i_td}{s_td}</tr>"
 
 
