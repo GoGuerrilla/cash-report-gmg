@@ -41,6 +41,11 @@ log = logging.getLogger(__name__)
 _EVAL_MODEL = os.environ.get("AEO_EVAL_MODEL", "claude-haiku-4-5-20251001")
 _EVAL_MAX_TOKENS = 200
 _EVAL_TIMEOUT   = 30  # seconds — each call should complete in 2-5s
+# Minimum page-text length for an AEO LLM evaluation to produce a meaningful
+# score. Below this we skip the call (neutral stub returned) rather than
+# burning Anthropic budget on a guess that reads like a real finding. Per
+# Dave 2026-05-10. Roughly 200 words = ~1,200 chars at average word length.
+_EVAL_MIN_CHARS = 1200
 
 # ── Scoring weights per the pillar spec ──────────────────────────────────────
 
@@ -130,11 +135,22 @@ class AEOAuditor:
                 bool(os.environ.get("ANTHROPIC_API_KEY")),
             )
             return None
-        if not self._page_text:
+        # Per Dave 2026-05-10 (token frugality): skip not just when text is
+        # completely absent, but also when it's too sparse for the LLM to
+        # form a meaningful judgement. Below ~200 words the model produces
+        # generic low-score stubs (we've seen "score=28 explain='Content
+        # is primarily marketing-focused with vague problem descriptions...'"
+        # fired against a 50-word JS-shell that the model couldn't possibly
+        # evaluate). Save the 3 × Haiku calls per sparse audit AND avoid
+        # surfacing fake low scores in the report.
+        text_len = len(self._page_text or "")
+        if text_len < _EVAL_MIN_CHARS:
             pages = self.site.get("pages", []) or []
             log.info(
-                "aeo llm-eval [%s] skipped: no page_text (pages_count=%d)",
-                label, len(pages),
+                "aeo llm-eval [%s] skipped: text too sparse "
+                "(%d chars, threshold=%d, pages_count=%d) — "
+                "saving Anthropic call, neutral stub used",
+                label, text_len, _EVAL_MIN_CHARS, len(pages),
             )
             return None
         try:
