@@ -296,7 +296,14 @@ class ICPAuditor:
             strengths.append(
                 f"✅ ICP-relevant language in bio/content: {', '.join(icp_hits[:5])}"
             )
-        else:
+        elif self.has_stated_icp:
+            # Only fire this gap when we actually have a stated ICP to
+            # compare against. Per Dave 2026-05-11: GMG audit showed both
+            # "No language specifically targeting 'your ideal client'"
+            # AND "No target market provided" — logically incoherent
+            # because we can't claim the language doesn't match a target
+            # we don't know. Suppress the alignment-vs-content claim when
+            # the target market itself is the unknown.
             issues.append(
                 f"🔴 No language specifically targeting '{self.icp}' detected in bio or content. "
                 f"Use the exact words your ideal client uses to describe their own problems."

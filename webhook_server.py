@@ -497,21 +497,50 @@ def _stage4_verify(audit_data: dict) -> List[Dict]:
     # Map each cannot_verify signal to the phrases the AI might use to
     # contradict it. Phrasing reflects how the AI tends to describe the
     # absence — "no testimonials", "no lead magnet", etc.
+    # Per Dave 2026-05-11 (GMG GTM verification): the AI synthesis slips
+    # past "add / create / build" verbs by substituting "publish / start /
+    # offer / launch / establish". Widen each cannot_verify signal's
+    # forbidden-phrase list to catch the substitution verbs that surfaced
+    # in the 12:25 GMG audit ("PUBLISH ONE SPECIFIC CLIENT CASE STUDY",
+    # "START AN EMAIL LIST FROM ZERO BY OFFERING ONE DOWNLOADABLE
+    # RESOURCE"). Each signal carries both the original verb set and the
+    # substitution verbs reported in production.
     forbidden_phrases = {
         "testimonials":   ["no testimonial", "add testimonial", "collect testimonial",
-                           "lack of testimonial", "missing testimonial"],
+                           "lack of testimonial", "missing testimonial",
+                           "publish testimonial", "post testimonial",
+                           "gather testimonial", "request testimonial"],
         "case_studies":   ["no case stud", "add a case stud", "create a case stud",
-                           "lack case stud", "missing case stud", "build case stud"],
-        "certifications": ["no certif", "add certif", "missing certif", "lack certif"],
-        "client_logos":   ["no client logo", "add client logo", "missing logo"],
-        "media_mentions": ["no media mention", "add media", "no press"],
+                           "lack case stud", "missing case stud", "build case stud",
+                           # substitution verbs from GMG 2026-05-11 12:25 audit
+                           "publish a case stud", "publish one specific client case stud",
+                           "publish one case stud", "publish one client case stud",
+                           "release a case stud", "launch a case stud",
+                           "produce a case stud", "write a case stud",
+                           "develop a case stud", "share a case stud"],
+        "certifications": ["no certif", "add certif", "missing certif", "lack certif",
+                           "obtain certif", "earn certif", "display certif"],
+        "client_logos":   ["no client logo", "add client logo", "missing logo",
+                           "display client logo", "show client logo",
+                           "feature client logo"],
+        "media_mentions": ["no media mention", "add media", "no press",
+                           "pitch media", "secure press", "earn press"],
         "lead_magnet":    ["no lead magnet", "add a lead magnet", "create a lead magnet",
-                           "missing lead magnet", "build a lead magnet"],
+                           "missing lead magnet", "build a lead magnet",
+                           "offer a lead magnet", "launch a lead magnet",
+                           "publish a lead magnet", "develop a lead magnet"],
         # Stage 2 v2 signals (Dave 2026-05-10 queue #2). Phrasing reflects
         # how the AI tends to describe absence of these on JS-heavy sites.
         "email_optin":    ["no email opt-in", "no opt-in form", "add an opt-in",
                            "missing email capture", "no email capture",
-                           "create an opt-in", "build an email"],
+                           "create an opt-in", "build an email",
+                           # substitution verbs from GMG 2026-05-11 12:25 audit
+                           "start an email list", "start a list from zero",
+                           "begin an email list", "launch an email list",
+                           "build an email list", "grow an email list from zero",
+                           "from zero by offering", "capture emails on the website",
+                           "offer one downloadable", "offering one downloadable",
+                           "offer a downloadable", "offering a downloadable"],
         "contact_form":   ["no contact form", "add a contact form",
                            "missing contact form", "create a contact form",
                            "no cta or contact form"],

@@ -598,10 +598,19 @@ press strips), JS-hydrated widgets (Wix / Squarespace email signup
 forms, lead-magnet popups, headings rendered as styled divs, buttons
 rendered as <div role="button">), and content embedded in
 third-party iframes. For ANY signal in that list:
-  ❌ Do NOT recommend "add a [signal]" / "create a [signal]" / "ADD A
-     LEAD MAGNET" / "ADD A H1 HEADING" / "ADD A CTA" — we don't know
-     they're missing. The phrase "currently absent" is also forbidden
-     because the signal may exist in a widget we couldn't read.
+  ❌ Do NOT recommend creating these signals using ANY verb —
+     including "add", "create", "build", "publish", "start", "launch",
+     "establish", "develop", "offer", "produce", "write", "release",
+     "grow", "begin", "post", "capture", "secure", "earn", "obtain".
+     ❌ "ADD A LEAD MAGNET" / "ADD A H1 HEADING" / "ADD A CTA"
+     ❌ "PUBLISH ONE SPECIFIC CLIENT CASE STUDY"
+     ❌ "START AN EMAIL LIST FROM ZERO BY OFFERING ONE DOWNLOADABLE..."
+     ❌ "LAUNCH A LEAD MAGNET" / "OFFER A FREE GUIDE"
+     ❌ "RELEASE A CASE STUDY" / "PRODUCE A CASE STUDY"
+     ❌ "CAPTURE EMAILS ON THE WEBSITE"
+     We don't know they're missing — the phrase "currently absent" is
+     forbidden for the same reason. The trap is to substitute one
+     creation-verb for another; that's still a violation.
   ❌ Do NOT label the signal absence as a "CRITICAL" gap or include
      it in top_3_priorities or biggest_waste.
   ❌ Do NOT use phrases like "NO H1 WAS FOUND" / "NO CTA WAS FOUND
