@@ -1011,15 +1011,60 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
                 config.twitter_handle = plat_data["twitter_handle"]
             if plat_data.get("discord_url"):
                 config.discord_url = plat_data["discord_url"]
-            linktree_data = {
-                "source_url":      config.website_url,
-                "profile_name":    name,
-                "bio":             "",
-                "classified_links": classified,
-                "platforms_found": platforms,
-                "data_verified":   True,
-                "scrape_status":   "ok_website_fallback",
-            }
+
+            # Per Dave 2026-05-11: when the website footer surfaces a
+            # Linktree URL, chain into LinktreeScraper so we pull the
+            # actual bio + any extra platforms only the Linktree page
+            # lists. Without this chain, the bio stays empty and the
+            # "no bio detected" finding ships even when the operator
+            # has a real, content-rich Linktree their visitors see.
+            _wf_linktree_url = plat_data.get("linktree_url", "")
+            if _wf_linktree_url:
+                log.info(
+                    "Website footer surfaced Linktree URL — chaining "
+                    "to LinktreeScraper: %s", _wf_linktree_url,
+                )
+                config.linktree_url = _wf_linktree_url
+                try:
+                    _t = time.time()
+                    _lt_data = LinktreeScraper(_wf_linktree_url).scrape()
+                    log.info("TIMING  linktree_chain_scrape %.2fs", time.time() - _t)
+                    if _lt_data.get("data_verified") and _lt_data.get("classified_links"):
+                        # Merge — Linktree wins for bio + adds any extra
+                        # platforms it lists that the website footer
+                        # didn't expose.
+                        _lt_plat = _classified_to_platforms(
+                            _lt_data["classified_links"]
+                        )
+                        for _attr, _val in _lt_plat.items():
+                            if _val and not getattr(config, _attr, None):
+                                setattr(config, _attr, _val)
+                        linktree_data = _lt_data
+                        # Preserve the website-scrape signal too —
+                        # platforms_found should reflect the union.
+                        linktree_data["platforms_found"] = sorted(set(
+                            (linktree_data.get("platforms_found") or [])
+                            + list(classified.keys())
+                        ))
+                        linktree_data["scrape_status"] = (
+                            "ok_linktree_chained_from_website"
+                        )
+                except Exception as _exc:
+                    log.warning(
+                        "Linktree chain-scrape failed: %s — falling back "
+                        "to website footer scrape only", _exc,
+                    )
+
+            if not linktree_data:
+                linktree_data = {
+                    "source_url":      config.website_url,
+                    "profile_name":    name,
+                    "bio":             "",
+                    "classified_links": classified,
+                    "platforms_found": platforms,
+                    "data_verified":   True,
+                    "scrape_status":   "ok_website_fallback",
+                }
             log.info("Website socials found: %s", platforms)
 
     if not linktree_data:

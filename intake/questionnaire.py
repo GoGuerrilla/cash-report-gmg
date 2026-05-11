@@ -222,6 +222,13 @@ def _classified_to_platforms(classified: Dict[str, Any]) -> Dict[str, Any]:
     if classified.get("Website"):
         platforms["_website_from_linktree"] = classified["Website"][0]
 
+    # Per Dave 2026-05-11: when website footer scrape picks up a Linktree
+    # (or similar bio-link) URL, surface it so the webhook caller can
+    # chain into LinktreeScraper for the additional profiles + bio that
+    # only live on the Linktree page itself.
+    if classified.get("Linktree"):
+        platforms["linktree_url"] = classified["Linktree"][0]
+
     platforms["unmatched"] = []
     return platforms
 
@@ -255,6 +262,13 @@ def _scrape_website_socials(url: str) -> Dict[str, Any]:
             ("TikTok",     r"tiktok\.com"),
             ("X",          r"twitter\.com|^x\.com|/x\.com|//x\.com"),
             ("Discord",    r"discord\.gg|discord\.com/invite"),
+            # Per Dave 2026-05-11: a Linktree (or similar bio-link page)
+            # in the website footer is a strong source of additional
+            # social profiles + a real bio. Catch the four most common
+            # bio-link platforms so we can downstream-scrape the actual
+            # Linktree page and pick up signals the website footer
+            # doesn't expose directly.
+            ("Linktree",   r"linktr\.ee|lnk\.bio|beacons\.ai|bio\.link"),
         ]
         classified: Dict[str, list] = {}
         for a in soup.find_all("a", href=True):

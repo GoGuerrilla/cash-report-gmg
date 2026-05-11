@@ -151,18 +151,33 @@ class ICPAuditor:
                 f"Ideal buyers scanning the homepage won't self-identify as the right fit."
             )
 
-        # Social-bio ICP check
+        # Social-bio ICP check — only fire when we actually have a bio to
+        # check. Per Dave 2026-05-11: GMG audit said both "No social
+        # profile bio could be read" (NOT DETECTED) AND "Social bio does
+        # not mention [target market]" (VERIFIED GAP) — logically
+        # incoherent. We can't claim the bio doesn't mention something
+        # when we never read the bio.
         bio = self.linktree.get("bio", "").lower()
-        bio_hits = _icp_hit_count(bio, self.keywords)
-        if bio_hits:
-            strengths.append(
-                f"✅ Social bio mentions ICP-relevant terms: {', '.join(bio_hits[:4])}"
-            )
+        if not bio:
+            # Brand auditor already emits one honest "bio not detected"
+            # finding (brand_auditor.py:_analyze_bio_consistency). No
+            # need to duplicate it here, and we can't make a meaningful
+            # alignment claim against an unread bio.
+            pass
         else:
-            issues.append(
-                f"🔴 Social bio does not mention '{self.icp}'. "
-                f"The first brand touchpoint fails to attract the stated ICP."
-            )
+            bio_hits = _icp_hit_count(bio, self.keywords)
+            if bio_hits:
+                strengths.append(
+                    f"✅ Social bio mentions ICP-relevant terms: {', '.join(bio_hits[:4])}"
+                )
+            elif self.has_stated_icp:
+                # Only assert misalignment when we have BOTH a real bio
+                # and a real target market to compare against. Without
+                # either, we're inventing a finding.
+                issues.append(
+                    f"🔴 Social bio does not mention '{self.icp}'. "
+                    f"The first brand touchpoint fails to attract the stated ICP."
+                )
 
         return {
             "issues":    issues,
