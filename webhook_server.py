@@ -463,7 +463,7 @@ def _infer_industry(
     return "General Business", "Other"
 
 
-def _stage4_verify(audit_data: dict) -> None:
+def _stage4_verify(audit_data: dict) -> List[Dict]:
     """
     Stage 4 — pre-delivery verification pass per Elliot Swift's brief.
 
@@ -488,11 +488,11 @@ def _stage4_verify(audit_data: dict) -> None:
     site = audit_data.get("website", {}) or {}
     cv_set = set(site.get("cannot_verify_signals") or [])
     if not cv_set:
-        return  # Nothing unmeasured — no chance of contradiction.
+        return []  # Nothing unmeasured — no chance of contradiction.
 
     ai = audit_data.get("ai_insights", {}) or {}
     if not ai or ai.get("parse_error"):
-        return  # No synthesis output to verify.
+        return []  # No synthesis output to verify.
 
     # Map each cannot_verify signal to the phrases the AI might use to
     # contradict it. Phrasing reflects how the AI tends to describe the
@@ -513,11 +513,27 @@ def _stage4_verify(audit_data: dict) -> None:
                            "missing email capture", "no email capture",
                            "create an opt-in", "build an email"],
         "contact_form":   ["no contact form", "add a contact form",
-                           "missing contact form", "create a contact form"],
+                           "missing contact form", "create a contact form",
+                           "no cta or contact form"],
         "pricing":        ["no visible pricing", "add visible pricing",
                            "missing pricing", "show pricing", "publish pricing"],
         "blog":           ["no blog", "add a blog", "start a blog",
                            "create a blog", "missing blog"],
+        # Stage 2 v3 (Dave 2026-05-11 — GMG GTM report). H1 and CTA
+        # detection both blind-spot on Wix JS-hydrated widgets. Phrasing
+        # in the GMG synthesis: "ADD A KEYWORD-MATCHED H1 HEADING —
+        # CURRENTLY ABSENT" and "ADD A PLAIN-TEXT 'GET A FREE MARKETING
+        # AUDIT' CTA BUTTON — NO CTA WAS FOUND DURING THE CRAWL". Both
+        # phrases caught here.
+        "h1":             ["no h1", "add a h1", "add an h1", "missing h1",
+                           "add a keyword-matched h1", "no heading",
+                           "currently absent", "h1 heading absent",
+                           "add a homepage h1"],
+        "cta":            ["no cta", "few cta", "add a cta", "add a button",
+                           "missing cta", "no call-to-action",
+                           "add a call-to-action", "few calls-to-action",
+                           "no clear cta", "add a plain-text",
+                           "add a 'get", "currently no cta"],
     }
 
     # Fields to scan — synthesis output where contradictions would show.
@@ -568,7 +584,7 @@ def _stage4_verify(audit_data: dict) -> None:
             "[STAGE4_VERIFY] OK — no contradictions vs cannot_verify=%s",
             sorted(cv_set),
         )
-        return
+        return []
 
     # Log every violation in a greppable format.
     for v in violations:
@@ -578,10 +594,10 @@ def _stage4_verify(audit_data: dict) -> None:
         )
     log.warning(
         "[STAGE4_VERIFY] %d violation(s) detected — synthesis recommended "
-        "action on cannot_verify signal(s). Report still ships (non-blocking) "
-        "but the AI directive needs tightening if this recurs.",
+        "action on cannot_verify signal(s).",
         len(violations),
     )
+    return violations
 
 
 def _audit_signal_haystack(audit_data: dict) -> str:
@@ -1600,19 +1616,53 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
     log.info("TIMING  ai_synthesis            %.2fs", time.time() - _t)
 
     # ── Stage 4 — pre-delivery verification pass ─────────────────
-    # Per Elliot Swift's audit-integrity brief (2026-05-06) + Dave
-    # 2026-05-10: scan the AI synthesis output for recommendations that
-    # contradict cannot_verify_signals. If the AI tells the operator to
-    # "add a lead magnet" while lead_magnet is in cannot_verify, that's
-    # a violation of the prompt directive (4931b08) — and a quality
-    # signal that the directive isn't being honoured. Log violations
-    # as [STAGE4_VIOLATION] so we can grep frequency. For now we
-    # only LOG; HOLD is reserved for clear-cut breaches once we've
-    # validated the false-positive rate is low.
+    # Per Dave 2026-05-11 (GMG GTM report): the original logging-only
+    # design (5648142) let an AI directive violation ship to Dave in
+    # the GMG audit — "ADD A H1 / ADD A CTA" recommendations fired
+    # against signals already in cannot_verify_signals. For the live
+    # GTM period escalate to HOLD: if Stage 4 detects violations, the
+    # report is held and a hold-warning email goes to GMG inbox
+    # instead of the report itself. Operator reviews + reruns.
+    # Kill switch: STAGE4_HOLD_ENABLED=0 disables HOLD escalation
+    # (back to logging-only) for incidents where the directive
+    # over-fires on legitimate audits.
+    _stage4_violations: List[Dict] = []
     try:
-        _stage4_verify(audit_data)
+        _stage4_violations = _stage4_verify(audit_data) or []
     except Exception as exc:
         log.warning("Stage 4 verification pass failed (non-blocking): %s", exc)
+
+    _stage4_hold_enabled = (
+        os.environ.get("STAGE4_HOLD_ENABLED", "1").strip() != "0"
+    )
+    if _stage4_violations and _stage4_hold_enabled:
+        # Emit the standard HOLD log line for greppability.
+        _violation_signals = sorted({v["signal"] for v in _stage4_violations})
+        log.error(
+            "[CASH HOLD] reason=stage4_violation url=%s timestamp=%s "
+            "violations=%d signals=%s",
+            config.website_url or "",
+            datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            len(_stage4_violations),
+            _violation_signals,
+        )
+        # Notify GMG inbox so Dave can review + rerun. Reuse the same
+        # admin-notification pattern that the apify-fail path uses.
+        _hold_note = (
+            f"Stage 4 verification caught {len(_stage4_violations)} "
+            f"directive violation(s) on signals {_violation_signals}. "
+            f"The AI synthesis recommended creating signals our crawler "
+            f"couldn't verify the absence of — report held for review. "
+            f"Disable holds via STAGE4_HOLD_ENABLED=0 if the directive "
+            f"is over-firing on legitimate audits."
+        )
+        try:
+            send_hold_warning_email(config, contact_email, _hold_note)
+        except Exception as exc:
+            log.warning("Hold-warning email failed: %s", exc)
+        # Short-circuit out of the audit thread — no PDF/DOCX/email
+        # generation, no rate-limit log (rerun is free for the operator).
+        return
 
     ai            = audit_data.get("ai_insights", {})
     overall_score = ai.get("overall_score")

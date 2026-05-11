@@ -491,6 +491,23 @@ def _merge_website_data(channel_data: dict, website_audit: dict, base_url: str =
     if not site.get("has_blog") and not _had_sitemap and _js_heavy:
         cannot_verify_signals.add("blog")
 
+    # Stage 2 v3 — H1 + CTA cannot_verify on JS-heavy platforms (Dave
+    # 2026-05-11 GMG GTM report). Same JS-hydration blind spot as
+    # lead_magnet: Wix renders <h1> tags through a custom widget that
+    # sometimes ships role="heading" aria-level="1" on a <div> instead
+    # of a semantic <h1>, and renders CTA buttons as deeply-nested
+    # <div role="button"> with JS click handlers. When the homepage on
+    # a JS-heavy platform reports h1_count=0 or cta_count=0, the most
+    # likely explanation is detection blindness, NOT actual absence —
+    # so don't recommend "add an H1" or "add a CTA" without a way to
+    # verify they're missing.
+    _hp_h1_count  = int(homepage_data.get("h1_count", 0) or 0)
+    _hp_cta_count = int(homepage_data.get("cta_count", 0) or 0)
+    if _hp_h1_count == 0 and _js_heavy:
+        cannot_verify_signals.add("h1")
+    if _hp_cta_count == 0 and _js_heavy:
+        cannot_verify_signals.add("cta")
+
     site["cannot_verify_signals"] = cannot_verify_signals
     if cannot_verify_signals:
         log.info(

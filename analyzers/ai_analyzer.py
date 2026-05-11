@@ -595,19 +595,43 @@ UNMEASURED-SIGNAL DIRECTIVE (Stage 2 / cannot_verify) — when the
 that signal could NOT be reliably checked by our crawler. The most
 common reasons are image-only badges (certifications, client logos,
 press strips), JS-hydrated widgets (Wix / Squarespace email signup
-forms, lead-magnet popups), and content embedded in third-party
-iframes. For ANY signal in that list:
+forms, lead-magnet popups, headings rendered as styled divs, buttons
+rendered as <div role="button">), and content embedded in
+third-party iframes. For ANY signal in that list:
   ❌ Do NOT recommend "add a [signal]" / "create a [signal]" / "ADD A
-     LEAD MAGNET" — we don't know they're missing.
+     LEAD MAGNET" / "ADD A H1 HEADING" / "ADD A CTA" — we don't know
+     they're missing. The phrase "currently absent" is also forbidden
+     because the signal may exist in a widget we couldn't read.
   ❌ Do NOT label the signal absence as a "CRITICAL" gap or include
      it in top_3_priorities or biggest_waste.
+  ❌ Do NOT use phrases like "NO H1 WAS FOUND" / "NO CTA WAS FOUND
+     DURING THE CRAWL" / "NO CONTACT FORM WAS FOUND" as evidence
+     for action — the absence in our crawl is not evidence of absence
+     on the live site for these signals.
   ✅ DO recommend the operator verify the signal manually, or surface
      it as plain text on the homepage if it exists in a widget.
-  ✅ DO use the phrase "verify" / "confirm" / "surface" rather than
-     "create" / "add" / "build".
-This rule is non-negotiable — it's the report's integrity layer.
-Recommending the operator build something we couldn't confirm is
-missing is the failure mode this directive exists to prevent.
+  ✅ DO use the phrase "verify" / "confirm" / "surface" / "ensure
+     visible in static HTML" rather than "create" / "add" / "build".
+
+CONCRETE EXAMPLES of the failure mode this directive prevents:
+  ❌ "ADD A KEYWORD-MATCHED H1 HEADING TO THE HOMEPAGE — CURRENTLY ABSENT"
+     (h1 in UNMEASURED SIGNALS → say "Verify the homepage H1 reads in
+      plain HTML; on Wix it sometimes renders as a styled <div> our
+      crawler can't see")
+  ❌ "ADD A 'GET A FREE MARKETING AUDIT' CTA — NO CTA WAS FOUND DURING THE CRAWL"
+     (cta in UNMEASURED SIGNALS → say "Verify your homepage CTAs
+      appear in the page source as plain HTML; widget-rendered
+      buttons sometimes hide from search engines too")
+  ❌ "ADD A LEAD MAGNET WITH AN EMAIL CAPTURE FORM"
+     (lead_magnet in UNMEASURED SIGNALS → say "Verify the email opt-in
+      survives static HTML rendering; surface it more prominently if
+      it exists")
+
+This rule is non-negotiable — it's the report's integrity layer and
+Stage 4 will HOLD the report if you violate it. Recommending the
+operator build something we couldn't confirm is missing is the
+failure mode this directive exists to prevent. When in doubt, switch
+"add" → "verify" and "create" → "surface".
 
 CLIENT: {config.client_name}
 INDUSTRY: {config.client_industry}
