@@ -1546,7 +1546,121 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
 
             log.info("JS render override complete: upgraded=%s  platform=%r", upgraded, platform)
 
+        # ── Stage 2 v4 — Cross-auditor contradiction reconciliation ──
+        # Awake Tech 2026-05-14: SEO auditor reported "🔴 No H1 tag" while
+        # Website auditor reported "✓ Single H1 tag" — same audit, same
+        # signal, opposite verdicts both labeled VERIFIED in the PDF.
+        # Stage 4 only catches synthesis-vs-cannot_verify contradictions
+        # and can't see cross-auditor disagreements where both auditors
+        # were confident.
+        #
+        # When two auditors disagree on the same signal (one says
+        # "missing", the other says "found" or "found_rendered") we don't
+        # actually know which is right — promote the signal to cannot_verify
+        # so the UNMEASURED-SIGNAL DIRECTIVE applies during synthesis, and
+        # replace both auditors' contradicting findings with a single
+        # "🔵 verify manually" entry so the report surfaces the uncertainty
+        # instead of presenting both verdicts as fact.
+        _cross_auditor_signals = ("h1", "title", "meta", "schema",
+                                  "canonical", "og")
+        _cross_auditor_unverified: set = set()
+        _web_vs_now = ((audit_data.get("website") or {}).get("homepage") or {}).get(
+            "validation_states"
+        ) or {}
+        _seo_vs_now = ((audit_data.get("seo") or {}).get("crawl_signals") or {}).get(
+            "validation_states"
+        ) or {}
+        _FOUND   = ("found", "found_rendered")
+        _MISSING = ("missing",)
+
+        for _sig in _cross_auditor_signals:
+            _wv = _web_vs_now.get(_sig)
+            _sv = _seo_vs_now.get(_sig)
+            if ((_wv in _FOUND   and _sv in _MISSING) or
+                (_wv in _MISSING and _sv in _FOUND)):
+                _cross_auditor_unverified.add(_sig)
+                log.warning(
+                    "[CROSS_AUDITOR_CONTRADICTION] signal=%r  website=%r  "
+                    "seo=%r — promoting to cannot_verify",
+                    _sig, _wv, _sv,
+                )
+                # Demote both validation_states to "unable" so downstream
+                # readers don't see contradicting "found" / "missing".
+                _web_vs_now[_sig] = "unable"
+                _seo_vs_now[_sig] = "unable"
+
+        if _cross_auditor_unverified:
+            # Phrases that identify the contradicting findings inside each
+            # auditor's issues/strengths lists. Lowercase-substring match.
+            _sig_phrases = {
+                "h1":        ("h1", "heading found", "heading absent"),
+                "title":     ("title tag", "page title", "title length"),
+                "meta":      ("meta description",),
+                "schema":    ("structured data", "schema markup"),
+                "canonical": ("canonical",),
+                "og":        ("og:", "open graph"),
+            }
+            _sig_label = {
+                "h1":        "H1 heading",
+                "title":     "page title",
+                "meta":      "meta description",
+                "schema":    "structured data",
+                "canonical": "canonical tag",
+                "og":        "Open Graph tags",
+            }
+            for _sig in _cross_auditor_unverified:
+                _patterns = _sig_phrases.get(_sig, (_sig,))
+                # Strip contradicting findings from BOTH auditors so neither
+                # section in the PDF asserts a verdict the other contradicts.
+                for _block_key in ("website", "seo"):
+                    _blk = audit_data.get(_block_key) or {}
+                    for _list_key in ("issues", "strengths"):
+                        _lst = _blk.get(_list_key) or []
+                        _blk[_list_key] = [
+                            s for s in _lst
+                            if not any(p in str(s).lower() for p in _patterns)
+                        ]
+                    audit_data[_block_key] = _blk
+                # Insert one "verify manually" entry into the SEO issues
+                # list — keeps it grouped with the SEO Health section in the
+                # PDF. The 🔵 prefix renders as UNVERIFIED in pdf_generator.
+                audit_data.setdefault("seo", {}).setdefault("issues", []).append(
+                    f"🔵 {_sig_label.get(_sig, _sig)} detection inconclusive — "
+                    f"our two automated checks disagreed. Verify manually in "
+                    f"page source or with a tool like Screaming Frog before "
+                    f"acting on this finding."
+                )
+            log.info(
+                "Cross-auditor contradictions resolved: %s — promoted to "
+                "cannot_verify and replaced contradicting findings",
+                sorted(_cross_auditor_unverified),
+            )
+
         _merge_website_data(channel_data, audit_data["website"])
+
+        # ── Stage 2 sync: mirror cannot_verify_signals onto audit_data ──
+        # Long-standing data-flow gap: _merge_website_data writes
+        # cannot_verify_signals onto channel_data["website"] (read by
+        # Phase-3 auditors like funnel / aeo via config.preloaded_channel_data)
+        # but the AI synthesis prompt + Stage 4 verification both read
+        # audit_data["website"]["cannot_verify_signals"]. Without this
+        # mirror, the UNMEASURED SIGNALS list in the synthesis prompt was
+        # always empty and Stage 4 had no signals to scan against. Also
+        # union in any cross-auditor unverified signals detected above.
+        _cd_cv = (channel_data.get("website") or {}).get(
+            "cannot_verify_signals"
+        ) or set()
+        if isinstance(_cd_cv, list):
+            _cd_cv = set(_cd_cv)
+        _merged_cv = set(_cd_cv) | _cross_auditor_unverified
+        if _merged_cv:
+            channel_data["website"]["cannot_verify_signals"] = _merged_cv
+            audit_data["website"]["cannot_verify_signals"]   = _merged_cv
+            log.info(
+                "cannot_verify mirrored to audit_data + cross-auditor "
+                "union: %s",
+                sorted(_merged_cv),
+            )
 
         # GBP signal upgrade — re-scan ALL pages crawled by Apify for review
         # CTAs, Maps links, Maps embeds, phone, address, schema. The original
