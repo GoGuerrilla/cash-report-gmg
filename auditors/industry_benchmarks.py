@@ -596,3 +596,120 @@ def industry_label(industry: str) -> str:
         if canonical.lower() in il or il in canonical.lower():
             return canonical
     return "Other"
+
+
+# ── Retention / referral framing per industry ──────────────────
+#
+# Horizon Advisers 2026-05-15: the synthesis produced "one free month
+# for every referral client who signs" for a financial advisory firm.
+# Financial advisors earn on AUM (% of assets) or fixed planning fees —
+# they have no monthly subscription product. The "free month" framing
+# is a SaaS pattern the model defaults to when retention guidance isn't
+# industry-anchored. This table lets the prompt explicitly forbid
+# wrong-flavor retention mechanics per industry and provide native
+# alternatives — with a "skip rather than fabricate" fallback for
+# industries where the model genuinely doesn't have a confident
+# industry-appropriate pricing mechanic.
+#
+# Each entry has three keys consumed by the synthesis prompt builder:
+#   revenue_model — one-line description of how the industry earns
+#                   (so the model understands the constraint)
+#   acceptable    — comma-separated framings that fit the revenue model
+#   forbidden     — comma-separated framings that would damage credibility
+#                   if used for this industry
+
+_RETENTION_FRAMING: Dict[str, Dict[str, str]] = {
+    "Financial Advisory": {
+        "revenue_model": "fee-only or AUM-based (% of assets managed) — NOT subscription",
+        "acceptable":    "complimentary planning review for the referrer, advisory-fee credit (X bps off next year's fee), referral acknowledgement gift, annual portfolio-review touchpoint, quarterly market-commentary newsletter",
+        "forbidden":     "free month, free trial, monthly subscription discount, free credit hours, '$X off your next subscription'",
+    },
+    "Legal": {
+        "revenue_model": "hourly billing, retainers, or contingency — NOT subscription",
+        "acceptable":    "complimentary initial consultation, retainer-credit for referrals, fee credit on next engagement, annual legal-checkup outreach, structured client-anniversary touchpoint",
+        "forbidden":     "free month, free trial, monthly subscription discount, 'free billable hours'",
+    },
+    "Accounting & CPA": {
+        "revenue_model": "engagement-based or hourly — NOT subscription",
+        "acceptable":    "complimentary tax-planning consultation, fee credit on next return, referral acknowledgement, quarterly tax-update touchpoint, year-end planning session",
+        "forbidden":     "free month, free trial, monthly subscription discount",
+    },
+    "Healthcare & Medical": {
+        "revenue_model": "per-visit fees or insurance-billed — referral kickbacks are REGULATED (Stark / anti-kickback)",
+        "acceptable":    "patient-education resources, structured follow-up cadence (post-visit at 1/4/12 weeks), appointment-reminder system, annual wellness-check outreach",
+        "forbidden":     "ANY monetary referral incentive (regulatory risk), free month, free trial, 'send a friend, get $X', patient bonus per referral",
+    },
+    "Real Estate": {
+        "revenue_model": "commission-based per closed transaction",
+        "acceptable":    "closing-gift program, past-client home-anniversary outreach, referral-network gifting, structured CRM cadence for past clients (annual market update + tax-time check-in)",
+        "forbidden":     "free month, free trial, subscription discount",
+    },
+    "Home Services & Trades": {
+        "revenue_model": "per-project or maintenance-plan based",
+        "acceptable":    "'$X off your next service' for referrals, maintenance-plan upsell, post-job 30/60/90-day follow-up, annual maintenance reminder, loyalty pricing on repeat work",
+        "forbidden":     "free month (only acceptable if a recurring service-plan product is verified in the audit data — do NOT assume one exists)",
+    },
+    "Restaurant & Food Service": {
+        "revenue_model": "transaction-based; loyalty programs common",
+        "acceptable":    "loyalty-program enrollment, birthday reward, referral-credit toward next visit, frequency-based VIP tier, win-back at 30-day-no-visit",
+        "forbidden":     "(none — most retention framings are industry-appropriate; just confirm tooling exists before recommending)",
+    },
+    "Retail & E-commerce": {
+        "revenue_model": "transaction-based; subscription only if subscription-box product",
+        "acceptable":    "referral credit toward next order, loyalty-program enrollment, anniversary discount, post-purchase email cadence, win-back campaigns",
+        "forbidden":     "free month / free trial framings UNLESS the audit data confirms a subscription product",
+    },
+    "Beauty & Wellness": {
+        "revenue_model": "appointment-based; memberships common in some sub-verticals",
+        "acceptable":    "membership-tier upsell, package-of-X pricing, referral credit toward next appointment, birthday reward, win-back at 60-day-no-visit",
+        "forbidden":     "free month framing only acceptable if a membership product is verified in audit data",
+    },
+    "Personal Brand & Creator": {
+        "revenue_model": "varies — courses, sponsorships, products, services",
+        "acceptable":    "community-building rituals, email-list nurture cadence, audience-engagement loops, paid-community retention, repeat-buyer email sequence",
+        "forbidden":     "subscription framings unless a verified membership / subscription product is in the audit data",
+    },
+    "Coach, Speaker & Author": {
+        "revenue_model": "program-based, course sales, retainers, or one-off engagements",
+        "acceptable":    "alumni community access, post-program nurture sequence, structured check-in cadence, advanced-program upsell, book-club / community ritual",
+        "forbidden":     "free month / free trial (programs are priced per-cohort or per-engagement, not monthly)",
+    },
+    "Startup & Early-stage": {
+        "revenue_model": "highly variable — DO NOT assume a revenue model without intake confirmation",
+        "acceptable":    "structured customer-success cadence, advisory-call retention, founder-led check-ins, NPS feedback loops",
+        "forbidden":     "specific pricing-mechanic retention without first confirming the client's revenue model from intake data — fabricated mechanics damage credibility",
+    },
+    "SaaS & Tech": {
+        "revenue_model": "subscription-based (MRR / ARR) — free month / trial framings ARE native to this industry",
+        "acceptable":    "free month for a closed referral, annual-upgrade discount, expansion-account credit, in-product engagement nudges, customer-success QBRs",
+        "forbidden":     "(none — subscription-style framings fit this industry)",
+    },
+    "Agency & Consulting": {
+        "revenue_model": "retainer or project-based — NOT consumer-subscription",
+        "acceptable":    "QBR cadence with each client, expansion-scope conversations, alumni-referral program with retainer credit, case-study co-marketing as retention touchpoint",
+        "forbidden":     "free month, free trial, consumer-subscription framings (retainer credit on the NEXT engagement is the right shape)",
+    },
+    "Non-profit & Cause": {
+        "revenue_model": "donor-based; grants and sponsorships",
+        "acceptable":    "donor-stewardship cadence, impact-report touchpoint, recurring-giving conversion, donor-appreciation event",
+        "forbidden":     "free month, free trial — these are commercial framings that don't fit donor retention",
+    },
+    "Professional B2B Services": {
+        "revenue_model": "retainer, project, or hourly — NOT consumer-subscription",
+        "acceptable":    "QBR cadence, executive-briefing program, expansion-scope conversations, referral acknowledgement, annual strategy-review touchpoint",
+        "forbidden":     "free month, free trial, consumer-subscription framings",
+    },
+}
+
+
+def get_retention_framing(industry: str) -> Dict[str, str]:
+    """Return retention/referral framing guidance for the given industry.
+
+    Returns dict with keys ``revenue_model``, ``acceptable``, ``forbidden``.
+    Returns an empty dict for unknown / "Other" industries — the caller
+    should fall back to operational cadence retention (communication
+    frequency, follow-up windows) rather than fabricate a pricing
+    mechanic the AI can't ground in industry knowledge.
+    """
+    canon = industry_label(industry)
+    return _RETENTION_FRAMING.get(canon, {})

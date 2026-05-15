@@ -38,6 +38,7 @@ from auditors.industry_benchmarks import (
     is_local_business,
     is_b2b,
     get_posting_benchmarks,
+    get_retention_framing,
 )
 
 # Load .env automatically when this module is imported so callers don't have to
@@ -457,7 +458,12 @@ class AIAnalyzer:
                 "INDUSTRY GUIDANCE: Industry could not be classified to a "
                 "canonical category. Do NOT make industry-specific claims "
                 "(e.g. 'most law firms…', 'in restaurants…'). Use the "
-                "client's stated_target_market and observable signals only."
+                "client's stated_target_market and observable signals only.\n"
+                "  RETENTION / REFERRAL FRAMING: industry unknown — do NOT "
+                "recommend specific pricing-mechanic retention (free month, "
+                "free trial, $X off subscription, referral bonus). Default "
+                "to operational retention: communication cadence, "
+                "structured follow-up, client-review touchpoints."
             )
         else:
             _primary    = get_primary_platforms(_ind_canon) or []
@@ -478,6 +484,39 @@ class AIAnalyzer:
                     )
             _post_block = "\n".join(_post_lines) if _post_lines else "  (no active channels)"
 
+            # Retention / referral framing guardrails for this industry —
+            # prevents wrong-flavor recommendations like "free month per
+            # referral" for fee-only financial advisors (Horizon Advisers
+            # 2026-05-15). Falls back to operational cadence retention if
+            # the industry has no canonical framing entry.
+            _retention = get_retention_framing(_ind_canon)
+            if _retention:
+                _retention_block = (
+                    f"  RETENTION / REFERRAL FRAMING for {_ind_canon}:\n"
+                    f"    Revenue model: {_retention['revenue_model']}\n"
+                    f"    ACCEPTABLE retention/referral mechanics: "
+                    f"{_retention['acceptable']}\n"
+                    f"    FORBIDDEN for this industry (would damage "
+                    f"credibility): {_retention['forbidden']}\n"
+                    f"    If you cannot construct a retention or referral "
+                    f"recommendation that matches this industry's revenue "
+                    f"model with high confidence, do NOT include one — "
+                    f"default to operational retention (communication "
+                    f"cadence, structured follow-up windows, client-review "
+                    f"touchpoints) rather than fabricate a pricing mechanic."
+                )
+            else:
+                _retention_block = (
+                    f"  RETENTION / REFERRAL FRAMING for {_ind_canon}: "
+                    f"no canonical framing on file. Do NOT recommend "
+                    f"specific pricing-mechanic retention (free month, "
+                    f"free trial, $X off subscription, referral bonus) "
+                    f"unless the audit data confirms the client's revenue "
+                    f"model supports it. Default to operational retention: "
+                    f"communication cadence, structured follow-up, client-"
+                    f"review touchpoints."
+                )
+
             _industry_block = (
                 f"INDUSTRY GUIDANCE (canonical: {_ind_canon}):\n"
                 f"  PRIMARY PLATFORMS (absence is CRITICAL): "
@@ -489,7 +528,8 @@ class AIAnalyzer:
                 f"  POSTING TARGETS for active channels:\n{_post_block}\n"
                 f"  Use these benchmarks for cadence recommendations. Do NOT "
                 f"recommend a primary platform the client is already on at "
-                f"or above 'ideal' cadence — recommend optimization instead."
+                f"or above 'ideal' cadence — recommend optimization instead.\n"
+                f"{_retention_block}"
             )
 
         if config.intake_completed:

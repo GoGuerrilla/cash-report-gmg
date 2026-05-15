@@ -543,17 +543,53 @@ class GBPAuditor:
         if not isinstance(place, dict):
             return
 
-        # Confirm match — title should overlap with the business name.
+        # Confirm match — prefer website-domain match over title match.
         # Reject obviously-wrong results so we never overwrite Tier-2 with
-        # a different business's data.
-        title = (place.get("title") or "").lower().strip()
-        nm    = self.name.lower().strip()
-        if title and nm and (nm not in title) and (title not in nm):
+        # a different business's data, but accept legal-entity / DBA name
+        # variants (Horizon Advisers 2026-05-15: GBP titled "Horizon Wealth
+        # Advisors, LLC" was discarded because strict substring match
+        # failed, even though the place's website matched the submitted
+        # domain exactly).
+        title         = (place.get("title")   or "").lower().strip()
+        place_website = (place.get("website") or "").lower().strip()
+        nm            = self.name.lower().strip()
+        own_domain    = _domain(self.website).lower() if self.website else ""
+        place_domain  = _domain(place_website).lower() if place_website else ""
+        website_match = bool(own_domain and place_domain and own_domain == place_domain)
+
+        if website_match:
             log.info(
-                "apify_maps: title %r doesn't match name %r — discarding result",
+                "apify_maps: website match — title=%r site=%r (name divergence ok)",
+                title, place_domain,
+            )
+        else:
+            # Strip common legal-entity suffixes before comparing names so
+            # "Horizon Wealth Advisors, LLC" can match "Horizon Advisers".
+            _LEGAL = re.compile(
+                r"[,.]?\s*\b(llc|l\.l\.c\.|inc|inc\.|corp|corp\.|ltd|"
+                r"ltd\.|co|co\.|company|llp|pllc|plc|pc|p\.c\.)\b\.?",
+                re.I,
+            )
+            nm_stripped    = _LEGAL.sub("", nm).strip()
+            title_stripped = _LEGAL.sub("", title).strip()
+            name_match = bool(
+                title and nm and (
+                    nm_stripped in title_stripped or
+                    title_stripped in nm_stripped
+                )
+            )
+            if not name_match:
+                log.info(
+                    "apify_maps: title %r doesn't match name %r "
+                    "and website %r doesn't match %r — discarding result",
+                    title, nm, place_domain or "—", own_domain or "—",
+                )
+                return
+            log.info(
+                "apify_maps: name match (legal-entity-stripped) — "
+                "title=%r name=%r",
                 title, nm,
             )
-            return
 
         # Promote regex-scraped fields to verified values.
         if place.get("totalScore") is not None:
@@ -906,25 +942,44 @@ def upgrade_with_pages(
                 s["site_phone"] = m.group(0)
 
         # 3. External links — Maps URL + Google review URL detection
-        for link in p.get("external_links", []) or []:
-            href = (link.get("to_url") or "")
-            if not href:
-                continue
-            if not s["maps_link_on_site"] and _MAPS_LINK_RE.search(href):
-                s["maps_link_on_site"] = True
-                if not s["maps_link_url"]:
-                    s["maps_link_url"] = href
-            if not s["review_link_on_site"] and _REVIEW_LINK_RE.search(href):
-                s["review_link_on_site"] = True
+        # Static-first pages store external_links as an int count, not a
+        # list of dicts (website_auditor._analyze_page line 836). Guard
+        # against both shapes: only iterate when it's a list. Horizon
+        # Advisers 2026-05-15 crashed here with "'int' object is not
+        # iterable" because `5 or []` returns 5, not [].
+        ext_links = p.get("external_links")
+        if isinstance(ext_links, list):
+            for link in ext_links:
+                if not isinstance(link, dict):
+                    continue
+                href = (link.get("to_url") or "")
+                if not href:
+                    continue
+                if not s["maps_link_on_site"] and _MAPS_LINK_RE.search(href):
+                    s["maps_link_on_site"] = True
+                    if not s["maps_link_url"]:
+                        s["maps_link_url"] = href
+                if not s["review_link_on_site"] and _REVIEW_LINK_RE.search(href):
+                    s["review_link_on_site"] = True
 
-        # 4. Iframe Maps embeds
-        for src in p.get("iframe_srcs", []) or []:
-            if "google.com/maps" in src or "maps.google.com" in src:
-                s["maps_embed_on_site"] = True
-                break
+        # 4. Iframe Maps embeds — Apify shape uses "iframe_srcs" (list of
+        # URL strings); static-first shape uses "iframe_sources" (also a
+        # list of strings, but capped at 3 and truncated to 80 chars).
+        # Check both keys.
+        iframe_srcs = p.get("iframe_srcs") or p.get("iframe_sources")
+        if isinstance(iframe_srcs, list):
+            for src in iframe_srcs:
+                if not isinstance(src, str):
+                    continue
+                if "google.com/maps" in src or "maps.google.com" in src:
+                    s["maps_embed_on_site"] = True
+                    break
 
         # 5. Schema.org LocalBusiness on inner pages
-        for item in p.get("structured_data", []) or []:
+        structured = p.get("structured_data")
+        if not isinstance(structured, list):
+            structured = []
+        for item in structured:
             if not isinstance(item, dict):
                 continue
             stype = item.get("@type", "")
