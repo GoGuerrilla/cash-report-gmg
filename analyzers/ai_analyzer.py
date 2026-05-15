@@ -459,11 +459,20 @@ class AIAnalyzer:
                 "canonical category. Do NOT make industry-specific claims "
                 "(e.g. 'most law firms…', 'in restaurants…'). Use the "
                 "client's stated_target_market and observable signals only.\n"
-                "  RETENTION / REFERRAL FRAMING: industry unknown — do NOT "
-                "recommend specific pricing-mechanic retention (free month, "
-                "free trial, $X off subscription, referral bonus). Default "
-                "to operational retention: communication cadence, "
-                "structured follow-up, client-review touchpoints."
+                "  RETENTION / REFERRAL FRAMING DIRECTIVE — NON-NEGOTIABLE: "
+                "industry unknown, so revenue model is unknown.\n"
+                "    ❌ Do NOT recommend any of these verbatim phrasings:\n"
+                "       ❌ \"Offer 1 free month for every referred client\"\n"
+                "       ❌ \"Free trial\" / \"Free month\"\n"
+                "       ❌ \"Monthly subscription discount\"\n"
+                "       ❌ \"$X off your next subscription\"\n"
+                "       ❌ \"Free credit hours\" / \"Free billable hours\"\n"
+                "    ✅ DO default to operational retention:\n"
+                "       ✅ \"Structured 30/60/90-day follow-up cadence\"\n"
+                "       ✅ \"Quarterly client-review touchpoints\"\n"
+                "       ✅ \"Newsletter cadence at <stated email frequency>\"\n"
+                "    Including no retention recommendation is strictly "
+                "better than including a fabricated pricing mechanic."
             )
         else:
             _primary    = get_primary_platforms(_ind_canon) or []
@@ -487,34 +496,66 @@ class AIAnalyzer:
             # Retention / referral framing guardrails for this industry —
             # prevents wrong-flavor recommendations like "free month per
             # referral" for fee-only financial advisors (Horizon Advisers
-            # 2026-05-15). Falls back to operational cadence retention if
-            # the industry has no canonical framing entry.
+            # 2026-05-15: first attempt at this directive used flowing
+            # prose and was ignored; second attempt — below — uses the
+            # explicit ❌/✅ verbatim-example format the model obeys for
+            # the UNMEASURED-SIGNAL DIRECTIVE).
             _retention = get_retention_framing(_ind_canon)
             if _retention:
+                _forbidden_lines = "\n".join(
+                    f"       ❌ \"{item.strip()}\""
+                    for item in _retention["forbidden"].split(",")
+                    if item.strip() and not item.strip().startswith("(none")
+                )
+                _acceptable_lines = "\n".join(
+                    f"       ✅ \"{item.strip()}\""
+                    for item in _retention["acceptable"].split(",")
+                    if item.strip()
+                )
                 _retention_block = (
-                    f"  RETENTION / REFERRAL FRAMING for {_ind_canon}:\n"
+                    f"  RETENTION / REFERRAL FRAMING DIRECTIVE for {_ind_canon} — "
+                    f"NON-NEGOTIABLE:\n"
                     f"    Revenue model: {_retention['revenue_model']}\n"
-                    f"    ACCEPTABLE retention/referral mechanics: "
-                    f"{_retention['acceptable']}\n"
-                    f"    FORBIDDEN for this industry (would damage "
-                    f"credibility): {_retention['forbidden']}\n"
-                    f"    If you cannot construct a retention or referral "
-                    f"recommendation that matches this industry's revenue "
-                    f"model with high confidence, do NOT include one — "
-                    f"default to operational retention (communication "
-                    f"cadence, structured follow-up windows, client-review "
-                    f"touchpoints) rather than fabricate a pricing mechanic."
+                    f"\n"
+                    f"    ❌ Do NOT recommend retention/referral mechanics "
+                    f"that don't fit this revenue model. The following "
+                    f"verbatim phrasings are FORBIDDEN for {_ind_canon} — "
+                    f"they damage credibility because they describe a "
+                    f"product or pricing model the client does not operate:\n"
+                    f"{_forbidden_lines}\n"
+                    f"\n"
+                    f"    ✅ DO use industry-native retention/referral "
+                    f"mechanics. Acceptable phrasings:\n"
+                    f"{_acceptable_lines}\n"
+                    f"\n"
+                    f"    This rule applies to ALL output fields — "
+                    f"top_3_priorities, 90_day_action_plan, "
+                    f"channel_recommendation, biggest_opportunity, and any "
+                    f"other field. If you cannot construct a retention or "
+                    f"referral recommendation that fits this revenue model "
+                    f"with high confidence, do NOT include one — default to "
+                    f"operational retention (communication cadence, "
+                    f"structured follow-up windows, client-review "
+                    f"touchpoints). Including no recommendation is strictly "
+                    f"better than including a wrong-flavor one."
                 )
             else:
                 _retention_block = (
-                    f"  RETENTION / REFERRAL FRAMING for {_ind_canon}: "
-                    f"no canonical framing on file. Do NOT recommend "
-                    f"specific pricing-mechanic retention (free month, "
-                    f"free trial, $X off subscription, referral bonus) "
-                    f"unless the audit data confirms the client's revenue "
-                    f"model supports it. Default to operational retention: "
-                    f"communication cadence, structured follow-up, client-"
-                    f"review touchpoints."
+                    f"  RETENTION / REFERRAL FRAMING DIRECTIVE for "
+                    f"{_ind_canon} — NON-NEGOTIABLE: industry has no "
+                    f"canonical retention framing on file.\n"
+                    f"    ❌ Do NOT recommend any of these verbatim phrasings:\n"
+                    f"       ❌ \"Offer 1 free month for every referred client\"\n"
+                    f"       ❌ \"Free trial\" / \"Free month\"\n"
+                    f"       ❌ \"Monthly subscription discount\"\n"
+                    f"       ❌ \"$X off your next subscription\"\n"
+                    f"       ❌ \"Free credit hours\" / \"Free billable hours\"\n"
+                    f"    ✅ DO default to operational retention:\n"
+                    f"       ✅ \"Structured 30/60/90-day follow-up cadence\"\n"
+                    f"       ✅ \"Quarterly client-review touchpoints\"\n"
+                    f"       ✅ \"Newsletter cadence at <stated email frequency>\"\n"
+                    f"    Including no retention recommendation is strictly "
+                    f"better than including a fabricated pricing mechanic."
                 )
 
             _industry_block = (

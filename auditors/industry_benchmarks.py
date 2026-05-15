@@ -622,7 +622,7 @@ _RETENTION_FRAMING: Dict[str, Dict[str, str]] = {
     "Financial Advisory": {
         "revenue_model": "fee-only or AUM-based (% of assets managed) — NOT subscription",
         "acceptable":    "complimentary planning review for the referrer, advisory-fee credit (X bps off next year's fee), referral acknowledgement gift, annual portfolio-review touchpoint, quarterly market-commentary newsletter",
-        "forbidden":     "free month, free trial, monthly subscription discount, free credit hours, '$X off your next subscription'",
+        "forbidden":     "Offer 1 free month for every referred client who signs, Offer a free month per referral, Free month for closed referral, free trial of advisory services, monthly subscription discount, free credit hours, $X off your next subscription",
     },
     "Legal": {
         "revenue_model": "hourly billing, retainers, or contingency — NOT subscription",
