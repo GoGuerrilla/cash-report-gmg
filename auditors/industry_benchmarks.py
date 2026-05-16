@@ -713,3 +713,111 @@ def get_retention_framing(industry: str) -> Dict[str, str]:
     """
     canon = industry_label(industry)
     return _RETENTION_FRAMING.get(canon, {})
+
+
+# ── Compliance / regulatory framing per industry ───────────────
+#
+# Horizon Advisers 2026-05-15 sweep surfaced three compliance-risky
+# recommendations for a SEC/FINRA-registered investment adviser:
+#   - "Build a case study page... before/after metrics is worth 100
+#      generic testimonials" (regulated by SEC Marketing Rule 206(4)-1)
+#   - "Add visible pricing or 'starting from' range" (fee schedules
+#      live in ADV Part 2A; AUM-based fees aren't flat-rate)
+#   - Plain "case study with named attribution" framing without any
+#      compliance caveat
+#
+# Several industries operate under advertising / endorsement rules that
+# make these recommendations actively harmful: doing what we suggested
+# could expose the operator to regulatory action. This table lets the
+# synthesis prompt forbid the risky framings per industry and substitute
+# compliant alternatives, with a "skip rather than fabricate" fallback
+# for industries without specific compliance constraints on file.
+#
+# Each entry consumed by the synthesis prompt builder:
+#   regulator    — one-line name of the governing body / rule
+#   restrictions — one-paragraph "why this matters" for the model
+#   forbidden    — comma-separated risky framings (prompted as ❌)
+#   acceptable   — comma-separated compliant alternatives (prompted as ✅)
+
+_COMPLIANCE_FRAMING: Dict[str, Dict[str, str]] = {
+    "Financial Advisory": {
+        "regulator":    "SEC Marketing Rule (Investment Advisers Act Rule 206(4)-1) / FINRA / state securities regulators",
+        "restrictions": "Client testimonials and endorsements are heavily regulated — the SEC Marketing Rule (effective Nov 2022) requires specific disclosures, oversight, and ineligibility checks. Performance claims with 'before/after metrics' or specific outcome numbers trigger advertising-rule scrutiny. Flat-rate or 'starting from' pricing is rarely displayed publicly because AUM/fee-only firms compute fees per client and fee schedules live in Form ADV Part 2A. Form CRS is required client-relationship disclosure for SEC- and state-registered advisers.",
+        "forbidden":    "Publish before/after client metrics on the website, Post client-specific case studies with outcome numbers, Add 'Starting from $X/month' pricing, Show flat-rate pricing on the homepage, Display testimonials without required SEC Marketing Rule disclosures, Advertise specific portfolio returns or performance",
+        "acceptable":   "Publish anonymized educational case-style narratives with no client identification and no performance claims, Reference ADV Part 2A for the fee schedule rather than displaying fees on the homepage, Surface FINRA / SEC registration and any CFP / CFA credentials, Link to Form CRS, Add disclosure language reviewed by a compliance officer before publishing any testimonial",
+    },
+    "Legal": {
+        "regulator":    "state bar advertising rules (varies by jurisdiction)",
+        "restrictions": "Client testimonials are regulated by state bar — most jurisdictions require disclaimer language (e.g. 'past results do not guarantee future outcomes'). Pricing disclosures vary by practice area — flat-fee marketing is common only in narrow contexts (estate planning, traffic, immigration consults). Solicitation rules differ between jurisdictions.",
+        "forbidden":    "Post client testimonials without state-bar-compliant disclaimers, Claim guaranteed outcomes or 'we win every case' framing, Advertise flat fees outside permitted practice areas, Publish before/after case results without ethics-compliant framing, Use 'specialist' / 'expert' language unless certified by the state bar",
+        "acceptable":   "Publish testimonials with the appropriate state-bar disclaimer language, Reference free initial consultation when the practice area allows, Surface bar admissions, practice areas, and verifiable experience, Anonymized matter summaries with disclaimer",
+    },
+    "Healthcare & Medical": {
+        "regulator":    "HIPAA / FDA / state medical board rules / Stark Law / Anti-Kickback Statute",
+        "restrictions": "Patient testimonials must comply with HIPAA — no PHI without explicit written authorization. Outcome claims are constrained by FDA and state medical board rules. Monetary referral incentives between healthcare providers are prohibited under Stark / anti-kickback. Off-label promotion of FDA-regulated products is barred.",
+        "forbidden":    "Post patient testimonials containing identifying information without HIPAA authorization, Claim specific success rates without FDA-permitted clinical data, Offer monetary referral incentives between providers, Advertise prescription medication discounts in non-permitted contexts, Promote off-label uses of FDA-regulated products",
+        "acceptable":   "Anonymized patient stories with explicit written HIPAA authorization on file, Board certifications and practice credentials, Accepted insurance plans and appointment availability, Educational content reviewed by a clinical compliance officer",
+    },
+    "Accounting & CPA": {
+        "regulator":    "AICPA Code of Conduct / state board of accountancy advertising rules",
+        "restrictions": "Client testimonials with named attribution have ethics constraints under the AICPA Code. CPA firms have additional restrictions when soliciting audit-engagement clients via certain advertising. State boards regulate use of 'CPA' designation.",
+        "forbidden":    "Advertise specific client tax-savings outcomes with named attribution, Claim guaranteed tax savings or specific refund amounts, Promise audit-fee refunds, Use 'CPA' designation in contexts where state licensure isn't confirmed",
+        "acceptable":   "Anonymized success summaries with no client identification, CPA license number / firm registration, Year-end planning availability, Niche industry expertise statements, Continuing-education credentials",
+    },
+}
+
+
+def get_compliance_framing(industry: str) -> Dict[str, str]:
+    """Return regulatory / compliance framing for the given industry.
+
+    Returns dict with keys ``regulator``, ``restrictions``, ``forbidden``,
+    ``acceptable``. Returns an empty dict for industries without recorded
+    compliance constraints — the caller should NOT emit a compliance
+    directive block in that case (don't fabricate compliance rules).
+    """
+    canon = industry_label(industry)
+    return _COMPLIANCE_FRAMING.get(canon, {})
+
+
+# ── Self-reference framing per industry ────────────────────────
+#
+# Horizon Advisers 2026-05-15: the synthesis produced "Build a 5-email
+# welcome sequence — Introduce agency, share case study, book discovery
+# call" for a financial advisory firm. Horizon Advisers is NOT an
+# agency — the model fell back to a generic B2B agency template.
+#
+# This table gives the model the industry-appropriate self-reference
+# (what to call the client's own business) so it doesn't default to
+# "agency" / "the brand" / "the company" boilerplate when a more
+# precise term exists.
+
+_SELF_REFERENCE: Dict[str, str] = {
+    "Financial Advisory":        "the advisory practice / the firm",
+    "Legal":                     "the practice / the firm / the law firm",
+    "Accounting & CPA":          "the firm / the CPA firm / the practice",
+    "Healthcare & Medical":      "the practice / the clinic",
+    "Restaurant & Food Service": "the restaurant",
+    "Retail & E-commerce":       "the shop / the store / the brand",
+    "Home Services & Trades":    "the business / the company",
+    "Real Estate":               "the brokerage / the practice",
+    "Beauty & Wellness":         "the studio / the salon / the spa",
+    "Personal Brand & Creator":  "your platform / your audience-business",
+    "Coach, Speaker & Author":   "the practice / the program / the coaching business",
+    "Startup & Early-stage":     "the startup / the company",
+    "SaaS & Tech":               "the company / the platform / the product",
+    "Agency & Consulting":       "the agency / the consultancy / the firm",
+    "Non-profit & Cause":        "the organization / the nonprofit",
+    "Professional B2B Services": "the firm",
+}
+
+
+def get_self_reference(industry: str) -> str:
+    """Return the industry-appropriate way to refer to the client's business.
+
+    Falls back to a generic "the business" when industry is unknown.
+    The synthesis prompt uses this to forbid generic / wrong-industry
+    self-references like "agency" for a financial advisor or "the
+    brand" for a law firm.
+    """
+    canon = industry_label(industry)
+    return _SELF_REFERENCE.get(canon, "the business")

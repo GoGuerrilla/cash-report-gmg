@@ -39,6 +39,8 @@ from auditors.industry_benchmarks import (
     is_b2b,
     get_posting_benchmarks,
     get_retention_framing,
+    get_compliance_framing,
+    get_self_reference,
 )
 
 # Load .env automatically when this module is imported so callers don't have to
@@ -558,6 +560,68 @@ class AIAnalyzer:
                     f"better than including a fabricated pricing mechanic."
                 )
 
+            # Compliance / regulatory directive for industries with
+            # advertising-rule constraints (Financial Advisory, Legal,
+            # Healthcare, Accounting). Horizon Advisers 2026-05-15 sweep
+            # caught us recommending "before/after client metrics" and
+            # "Starting from $X/month pricing" to a SEC/FINRA-registered
+            # adviser — both create regulatory risk for the operator.
+            _compliance = get_compliance_framing(_ind_canon)
+            if _compliance:
+                _comp_forbidden_lines = "\n".join(
+                    f"       ❌ \"{item.strip()}\""
+                    for item in _compliance["forbidden"].split(",")
+                    if item.strip()
+                )
+                _comp_acceptable_lines = "\n".join(
+                    f"       ✅ \"{item.strip()}\""
+                    for item in _compliance["acceptable"].split(",")
+                    if item.strip()
+                )
+                _compliance_block = (
+                    f"\n  COMPLIANCE / REGULATORY DIRECTIVE for {_ind_canon} — "
+                    f"NON-NEGOTIABLE:\n"
+                    f"    Regulator: {_compliance['regulator']}\n"
+                    f"    Why this matters: {_compliance['restrictions']}\n"
+                    f"\n"
+                    f"    ❌ Do NOT recommend the following — they create "
+                    f"regulatory risk for the operator and could expose them "
+                    f"to enforcement action:\n"
+                    f"{_comp_forbidden_lines}\n"
+                    f"\n"
+                    f"    ✅ DO recommend compliant alternatives:\n"
+                    f"{_comp_acceptable_lines}\n"
+                    f"\n"
+                    f"    Applies to ALL output fields — top_3_priorities, "
+                    f"90_day_action_plan, sales/funnel recommendations, "
+                    f"retention recommendations, biggest_opportunity, "
+                    f"channel_recommendation, content_strategy. If you "
+                    f"cannot construct a compliant recommendation, do NOT "
+                    f"include one — defer to operational guidance (e.g., "
+                    f"'consult with a compliance officer before publishing "
+                    f"client outcomes') rather than fabricate a risky rec."
+                )
+            else:
+                _compliance_block = ""
+
+            # Self-reference directive — give the model the industry-
+            # appropriate way to refer to the client's business so it
+            # doesn't default to "agency" / "the brand" boilerplate.
+            # Horizon Advisers 2026-05-15: synthesis produced "Build a
+            # 5-email welcome sequence — Introduce agency, share case
+            # study" for a financial advisory firm.
+            _self_ref = get_self_reference(_ind_canon)
+            _self_ref_block = (
+                f"\n  SELF-REFERENCE DIRECTIVE for {_ind_canon}:\n"
+                f"    When referring to the client's own business in any "
+                f"recommendation Detail, action, or outcome field, use: "
+                f"\"{_self_ref}\" — or the actual business name. "
+                f"❌ Do NOT default to \"agency\", \"the agency\", \"the "
+                f"brand\", or other generic placeholders when an industry-"
+                f"specific term exists. The word \"agency\" is only "
+                f"appropriate when industry_category is 'Agency & Consulting'."
+            )
+
             _industry_block = (
                 f"INDUSTRY GUIDANCE (canonical: {_ind_canon}):\n"
                 f"  PRIMARY PLATFORMS (absence is CRITICAL): "
@@ -571,6 +635,8 @@ class AIAnalyzer:
                 f"recommend a primary platform the client is already on at "
                 f"or above 'ideal' cadence — recommend optimization instead.\n"
                 f"{_retention_block}"
+                f"{_compliance_block}"
+                f"{_self_ref_block}"
             )
 
         if config.intake_completed:
