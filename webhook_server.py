@@ -2403,7 +2403,21 @@ def cash_report():
             reason     = reason.split("\n")[0],
         )
         _send_rejection_email(contact_email, config.client_name, reason)
-        return _add_cors(jsonify({"success": False, "message": "Too many submissions. Please try again later."})), 429
+        # Per Dave 2026-05-15: when the rate limiter blocks a Wix
+        # submission, the form was returning a generic "Too many
+        # submissions" string with no specific reason — Dave thought a
+        # submission was silently lost when he tried to re-run Horizon
+        # Advisers. Return the structured reason so a Wix form that
+        # displays response.message OR checks the rate_limited flag
+        # can surface a meaningful warning ("audited on YYYY-MM-DD,
+        # next audit available after YYYY-MM-DD") to the submitter
+        # immediately. The email rejection path stays intact.
+        return _add_cors(jsonify({
+            "success":      False,
+            "rate_limited": True,
+            "reason_type":  "rate_limit",
+            "message":      reason,
+        })), 429
 
     # Launch audit in background thread
     token = f"wix-{contact_email}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
@@ -2633,6 +2647,22 @@ a.ul:hover{text-decoration:underline}
         <textarea name="target_market" rows="2" placeholder="Who is this client's ideal customer? e.g. 'B2B SaaS founders, $1-10M ARR'"></textarea>
       </div>
       <div>
+        <label>Competitor URLs (comma- or newline-separated)</label>
+        <textarea name="competitor_urls" rows="2" placeholder="https://competitor-a.com, https://competitor-b.com, https://competitor-c.com"></textarea>
+      </div>
+      <div>
+        <label>Monthly Ad Budget ($)</label>
+        <input type="text" name="monthly_ad_budget" placeholder="0">
+      </div>
+      <div>
+        <label>Email List Size</label>
+        <input type="text" name="email_list_size" placeholder="0">
+      </div>
+      <div>
+        <label>Email Send Frequency</label>
+        <input type="text" name="email_frequency" placeholder="weekly | biweekly | monthly | quarterly | never">
+      </div>
+      <div>
         <button type="submit" class="btn">&#9654; Run Audit</button>
       </div>
     </form>
@@ -2776,10 +2806,15 @@ def admin_trigger():
         # form's required-ICP behaviour, except optional (admins may
         # genuinely want to run an unscored alignment audit).
         "target_market":     request.form.get("target_market", "").strip(),
-        "monthly_ad_budget": "0",
-        "email_list_size":   "0",
-        "email_frequency":   "",
-        "competitor_urls":   "",
+        # Per Dave 2026-05-16: the admin trigger now exposes the same
+        # intake fields the public Wix form captures so smoke-test
+        # audits structurally match what a real client submission
+        # would produce. Each field defaults to a safe value when the
+        # admin leaves the input blank.
+        "monthly_ad_budget": request.form.get("monthly_ad_budget", "0").strip() or "0",
+        "email_list_size":   request.form.get("email_list_size", "0").strip() or "0",
+        "email_frequency":   request.form.get("email_frequency", "").strip(),
+        "competitor_urls":   request.form.get("competitor_urls", "").strip(),
         "biggest_challenge": "",
         "phone":             "",
         "marketing_consent": "no",
