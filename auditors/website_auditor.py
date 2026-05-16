@@ -40,6 +40,41 @@ _JS_SPA_PLATFORMS = {"react", "vue", "wix"}
 
 log = logging.getLogger(__name__)
 
+# Off-site social-platform domains — never a lead magnet, always a link
+# to an external social profile. Horizon Advisers 2026-05-15: the
+# homepage's Facebook footer icon was being captured as the lead-magnet
+# URL because the static-fetch scan iterated <a> tags without a
+# domain guard, and downstream the report celebrated "Lead magnet
+# present on website" while also recommending "Build a lead magnet."
+_LEAD_MAGNET_SKIP_DOMAINS = (
+    "facebook.com", "fb.com", "fb.me",
+    "instagram.com", "instagr.am",
+    "twitter.com", "x.com",
+    "linkedin.com", "lnkd.in",
+    "tiktok.com",
+    "youtube.com", "youtu.be",
+    "pinterest.com",
+    "reddit.com",
+    "snapchat.com",
+    "threads.net",
+    "discord.com", "discord.gg",
+    "telegram.org", "t.me",
+    "whatsapp.com", "wa.me",
+    "linktr.ee", "lnk.bio", "beacons.ai", "bio.link",
+)
+
+
+def _is_offsite_social_url(url: str) -> bool:
+    """True if the URL points to an external social platform or bio-link
+    aggregator. Social profile links are not lead magnets — they're
+    outbound platform links that should never be promoted to a lead-
+    magnet finding."""
+    if not url:
+        return False
+    url_lc = url.lower()
+    return any(d in url_lc for d in _LEAD_MAGNET_SKIP_DOMAINS)
+
+
 # Lead magnet / funnel detection — scanned in _analyze_page() on the homepage
 _LEAD_MAGNET_HREF_KWS = (
     "cash-report", "free-report", "free-audit", "lead-magnet",
@@ -249,15 +284,19 @@ def _adapt_apify_to_pages(apify_result: dict) -> List[Dict]:
 
         # Tier 1 — keyword-matched CTA (existing path; works when Apify
         # captured the button and the text matches our vocab).
+        # Off-site social URLs are NEVER lead magnets — skip them.
         for cta in ctas:
-            href_lc = (cta.get("href") or "").lower()
+            href    = (cta.get("href") or "").strip()
+            href_lc = href.lower()
             text_lc = (cta.get("text") or "").lower()
+            if _is_offsite_social_url(href):
+                continue
             if any(kw in href_lc for kw in _LEAD_MAGNET_HREF_KWS):
-                lead_magnet_url = (cta.get("href") or "").strip()
+                lead_magnet_url = href
                 lead_magnet_cta = cta.get("text", "")
                 break
             if not lead_magnet_url and any(kw in text_lc for kw in _LEAD_MAGNET_TEXT_KWS):
-                lead_magnet_url = (cta.get("href") or "").strip()
+                lead_magnet_url = href
                 lead_magnet_cta = cta.get("text", "")
 
         # Tier 2 — downloadable asset link. A href to a free PDF / eBook /
@@ -772,6 +811,11 @@ class WebsiteAuditor:
             href    = a.get("href", "")
             href_lc = href.lower()
             text_lc = a.get_text(" ", strip=True).lower()
+            # Off-site social URLs are NEVER lead magnets — Horizon
+            # Advisers 2026-05-15 caught a Facebook footer icon being
+            # promoted to lead_magnet_url because no domain guard ran.
+            if _is_offsite_social_url(href):
+                continue
             if any(kw in href_lc for kw in _LEAD_MAGNET_HREF_KWS):
                 lead_magnet_url = href.strip()
                 lead_magnet_cta = a.get_text(" ", strip=True)

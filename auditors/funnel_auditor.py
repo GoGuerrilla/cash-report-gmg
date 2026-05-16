@@ -137,11 +137,14 @@ class FunnelAuditor:
             issues.append("🟡 No contact form visible — friction for inbound leads.")
 
         if booking_url:
-            if "calendar.google.com" in booking_url or "calendly" in booking_url.lower():
+            # Only flag a raw Google Calendar link as unprofessional.
+            # Calendly IS a dedicated scheduling tool — don't flag it.
+            if "calendar.google.com" in booking_url:
                 issues.append(
                     "🟡 Booking goes to a raw Google Calendar link. "
                     "This reads as unprofessional for most service-business buyers. "
-                    "Replace with a dedicated scheduling tool (e.g. [YOUR BOOKING LINK])."
+                    "Replace with a dedicated scheduling tool (Calendly, "
+                    "Acuity, SavvyCal, Cal.com, or HubSpot Meetings)."
                 )
             else:
                 strengths.append(f"✅ Booking/scheduling link present: {booking_url[:60]}")
@@ -374,7 +377,7 @@ class FunnelAuditor:
             {
                 "priority": "HIGH",
                 "action": "Replace Google Calendar booking link with a dedicated scheduling tool",
-                "example": "[YOUR BOOKING LINK]",
+                "example": "Calendly, Acuity, SavvyCal, Cal.com, or HubSpot Meetings — pick one that supports buffer questions for lead qualification",
                 "timeline": "1 day",
                 "impact": "Looks professional; adds buffer questions to qualify leads"
             },

@@ -1949,18 +1949,35 @@ class PDFReportGenerator:
 
         # Try to use the 90-day plan; fall back to splitting top_3_priorities
         if plan:
-            # Map week ranges to phases
+            # Map week ranges to phases. Horizon Advisers 2026-05-15: the
+            # previous substring-match logic ("9" or "12" both contain "1"
+            # / "2") routed every week-9-12 item into Phase 1, collapsing
+            # Phase 3 to the generic placeholder. Parse the starting week
+            # number cleanly instead.
+            import re as _re
+
+            def _phase_for_week(w: str) -> int:
+                m = _re.match(r"^\s*(\d+)", str(w))
+                if not m:
+                    return 1
+                start = int(m.group(1))
+                if start <= 4:
+                    return 1  # Days 1-30
+                if start <= 8:
+                    return 2  # Days 31-60
+                return 3      # Days 61-90
+
             phase1_rows = phase2_rows = phase3_rows = ""
             for item in plan:
-                week   = str(item.get("week", ""))
-                action = item.get("action", "")
+                week    = str(item.get("week", ""))
+                action  = item.get("action", "")
                 outcome = item.get("outcome", "")
-                tl     = f"Week {week}" if week else "—"
-                # Assign to phase based on week number
-                if any(x in week for x in ("1", "2", "1-2", "2-4", "3-4")):
-                    phase1_rows += _rec_row("CRITICAL" if "1" in week else "HIGH",
-                                            action, outcome, tl)
-                elif any(x in week for x in ("5", "6", "7", "8", "5-8")):
+                tl      = f"Week {week}" if week else "—"
+                phase   = _phase_for_week(week)
+                if phase == 1:
+                    priority = "CRITICAL" if week.startswith("1") else "HIGH"
+                    phase1_rows += _rec_row(priority, action, outcome, tl)
+                elif phase == 2:
                     phase2_rows += _rec_row("HIGH", action, outcome, tl)
                 else:
                     phase3_rows += _rec_row("MEDIUM", action, outcome, tl)

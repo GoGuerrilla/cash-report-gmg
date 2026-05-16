@@ -279,7 +279,7 @@ class ContentAuditor:
         # Booking tool upgrade — only flag if we know they use Google Calendar
         if self.config.booking_tool and "google calendar" in self.config.booking_tool.lower():
             wins.append({
-                "win":      "Replace raw Google Calendar link with a dedicated scheduling tool — [YOUR BOOKING LINK]",
+                "win":      "Replace raw Google Calendar link with a dedicated scheduling tool (Calendly, Acuity, SavvyCal, Cal.com, or HubSpot Meetings)",
                 "effort":   "Low (30 min)",
                 "impact":   "Professional booking flow with qualification questions and automatic reminders",
                 "timeline": "Today",

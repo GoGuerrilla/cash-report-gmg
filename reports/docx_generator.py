@@ -1590,7 +1590,7 @@ class DocxReportGenerator:
 
         p2 = cell.add_paragraph()
         p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        r2 = p2.add_run("[YOUR BOOKING LINK]")
+        r2 = p2.add_run("www.gogmg.net/meeting")
         r2.font.name = "Calibri"; r2.font.size = Pt(13)
         r2.font.color.rgb = _rgb(GOLD)
 

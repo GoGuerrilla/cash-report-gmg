@@ -33,6 +33,20 @@ PLATFORM_FIT = {
     "Discord":   ("Gaming/crypto communities — near-zero B2B professional services overlap", False),
 }
 
+# Map display name → preloaded channel-data key (case-mismatch between
+# linktree.platforms_found, which uses display names, and the preloaded
+# dict which uses lowercase keys). X reports under "twitter".
+_PLATFORM_PRELOAD_KEY = {
+    "LinkedIn":  "linkedin",
+    "YouTube":   "youtube",
+    "Facebook":  "facebook",
+    "Instagram": "instagram",
+    "X":         "twitter",
+    "Twitter":   "twitter",
+    "TikTok":    "tiktok",
+    "Discord":   "discord",
+}
+
 # Stopwords stripped before building ICP keyword set
 _STOPWORDS = {
     "and", "or", "the", "a", "an", "in", "at", "for", "of", "to", "with",
@@ -245,6 +259,33 @@ class ICPAuditor:
             "content_scraped":       content_scraped,
         }
 
+    def _is_platform_dormant(self, platform: str) -> bool:
+        """True if a platform is detected but has no recent activity.
+
+        Uses preloaded channel data (which carries activity signals from
+        the social-scraping phase). A dormant account is detected via:
+          - days_since_last_post > 60 days, OR
+          - posts_per_week explicitly == 0, OR
+          - is_active explicitly False
+
+        Returns False (treat as active) when there's no preloaded data
+        for the platform — we'd rather miss a dormant flag than falsely
+        suppress a real strength.
+        """
+        key = _PLATFORM_PRELOAD_KEY.get(platform)
+        if not key:
+            return False
+        data = self.preloaded.get(key, {}) or {}
+        if data.get("is_active") is False:
+            return True
+        days_since = data.get("days_since_last_post")
+        if isinstance(days_since, (int, float)) and days_since > 60:
+            return True
+        ppw = data.get("posts_per_week")
+        if isinstance(ppw, (int, float)) and ppw == 0:
+            return True
+        return False
+
     def _assess_platform_alignment(self) -> Dict:
         issues, strengths = [], []
         platforms = self.linktree.get("platforms_found", [])
@@ -260,7 +301,23 @@ class ICPAuditor:
         for platform in platforms:
             if platform in ("Email", "Website"):
                 continue
+            # Dormancy check — Horizon Advisers 2026-05-15: the audit
+            # listed "✓ VERIFIED — On X: Platform detected" as a strength
+            # for an account with 469 days of silence and 6 followers.
+            # A dormant account is not a strength; calling it one
+            # misleads the operator and anyone checking the report.
+            dormant = self._is_platform_dormant(platform)
             fit_note, positive = PLATFORM_FIT.get(platform, ("Platform detected", True))
+            if dormant:
+                issues.append(
+                    f"🟡 On {platform}: account detected but inactive — "
+                    f"the most recent activity is stale. Either reactivate "
+                    f"with a posting cadence the platform's algorithm "
+                    f"rewards, or deprioritise and archive so the dead "
+                    f"profile doesn't signal abandonment to anyone who "
+                    f"checks."
+                )
+                continue
             if positive:
                 strengths.append(f"✅ On {platform}: {fit_note}.")
             else:
@@ -286,9 +343,18 @@ class ICPAuditor:
                 f"buyers can associate it with this business."
             )
 
-        # Email newsletter for any professional ICP
-        newsletter_active = self.preloaded.get("website", {}).get("has_newsletter", False)
-        if not newsletter_active:
+        # Email newsletter for any professional ICP.
+        # Trust intake-form fields (config.has_active_newsletter,
+        # config.email_list_size) over website-crawl heuristics — the
+        # client knows whether they run a newsletter; we can only see
+        # an embedded signup widget. Horizon Advisers 2026-05-15: the
+        # report contradicted itself by emitting "No email newsletter
+        # detected" here while the Retention section showed "Newsletter:
+        # Active, 3,000 contacts" (from intake).
+        newsletter_intake = bool(getattr(self.config, "has_active_newsletter", False))
+        newsletter_size   = int(getattr(self.config, "email_list_size", 0) or 0)
+        newsletter_site   = bool(self.preloaded.get("website", {}).get("has_newsletter", False))
+        if not (newsletter_intake or newsletter_size > 0 or newsletter_site):
             issues.append(
                 f"🟡 No email newsletter detected. Email is the highest-ownership channel "
                 f"for nurturing '{self.icp}' prospects."

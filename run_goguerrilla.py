@@ -445,7 +445,18 @@ def _merge_website_data(channel_data: dict, website_audit: dict, base_url: str =
     # to "ADD A LEAD MAGNET" when one might already exist.
     homepage_data = website_audit.get("homepage", {}) or {}
     _platform_lc = (website_audit.get("platform") or "").lower()
-    _js_heavy = _platform_lc in ("wix", "squarespace", "webflow", "shopify")
+    # Treat "unknown" / "" as JS-heavy for cannot_verify purposes —
+    # Horizon Advisers 2026-05-15: when the platform-detector can't
+    # identify the stack, we don't actually know whether signals are
+    # missing or just JS-hydrated. Erring toward cannot_verify avoids
+    # the "ADD A LEAD MAGNET" recommendation on sites where one likely
+    # exists. Known non-JS platforms (wordpress, ghost, custom) should
+    # NOT trigger this — they emit complete HTML and absence is reliable.
+    _KNOWN_NON_JS = ("wordpress", "ghost", "drupal", "joomla")
+    _js_heavy = (
+        _platform_lc in ("wix", "squarespace", "webflow", "shopify")
+        or (_platform_lc in ("", "unknown") and _platform_lc not in _KNOWN_NON_JS)
+    )
     _lead_magnet_detected = bool(homepage_data.get("lead_magnet_url"))
     if not _lead_magnet_detected and _js_heavy:
         cannot_verify_signals.add("lead_magnet")
