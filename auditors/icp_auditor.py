@@ -24,6 +24,36 @@ GENERAL_SMB_SIGNALS = [
     "community building", "gaming",
 ]
 
+# Word-boundary regex patterns for each signal. Horizon Advisers
+# 2026-05-18: substring matching false-positived "defi" against
+# "define" and "undefined" in HA's homepage HTML (common English /
+# JS console output, not the crypto term). Several short signals
+# in this list ("defi", "dao", "nft", "token", "crypto") risk the
+# same substring-of-longer-word match — switch to word-boundary
+# regex so only standalone words count. Compiled once at import.
+_GENERAL_SMB_SIGNAL_PATTERNS = [
+    (signal, re.compile(
+        # Allow whitespace flex inside multi-word signals
+        # (e.g. "small business" matches "small  business" too).
+        r"\b" + r"\s+".join(re.escape(p) for p in signal.split()) + r"\b",
+        re.I,
+    ))
+    for signal in GENERAL_SMB_SIGNALS
+]
+
+
+def _general_smb_hits(text: str) -> List[str]:
+    """Return GENERAL_SMB_SIGNALS that appear as standalone words/phrases.
+
+    Uses compiled word-boundary regex (see _GENERAL_SMB_SIGNAL_PATTERNS)
+    so "defi" doesn't substring-match "define" or "undefined" — the
+    Horizon Advisers 2026-05-18 false positive that flagged "broad/
+    general audience language detected: defi" on a financial advisory
+    homepage that contained no DeFi content.
+    """
+    return [signal for signal, pattern in _GENERAL_SMB_SIGNAL_PATTERNS
+            if pattern.search(text)]
+
 # ── Platform B2B fit (platform → (ICP fit note, is_b2b_positive)) ─
 PLATFORM_FIT = {
     "LinkedIn":  ("Primary B2B discovery and authority channel",              True),
@@ -213,7 +243,7 @@ class ICPAuditor:
         content_scraped = bool(all_content.strip())
 
         icp_hits     = _icp_hit_count(all_content, self.keywords) if content_scraped else []
-        general_hits = [s for s in GENERAL_SMB_SIGNALS if s in all_content] if content_scraped else []
+        general_hits = _general_smb_hits(all_content) if content_scraped else []
 
         if content_scraped:
             if icp_hits:
@@ -471,8 +501,9 @@ class ICPAuditor:
                     f"Use the exact words your ideal client uses to describe their own problems."
                 )
 
-        # Generic/misaligned language check
-        general_hits = [s for s in GENERAL_SMB_SIGNALS if s in all_text]
+        # Generic/misaligned language check (word-boundary so "defi"
+        # doesn't false-positive against "define" / "undefined").
+        general_hits = _general_smb_hits(all_text)
         if general_hits:
             issues.append(
                 f"🟡 Broad/general audience language detected: {', '.join(general_hits[:5])}. "
@@ -592,16 +623,50 @@ class ICPAuditor:
         pct = content.get("alignment_percentage")  # None = unverifiable
         recs = []
 
+        # Horizon Advisers 2026-05-18: this hardcoded "Rewrite homepage,
+        # bio, and social profiles to speak directly to <icp>" CRITICAL
+        # rec shipped even when audience was clearly communicated via
+        # H2 service blocks and body text. Soften when those audience
+        # signals exist — recommend a value-prop refinement instead of
+        # a wholesale rewrite. Both signals live on
+        # config.preloaded_channel_data["website"]:
+        #   - audience_in_h2  (boolean, set by _merge_website_data)
+        #   - icp_mentions    (list of keywords found in homepage body)
+        site_data        = self.preloaded.get("website", {}) or {}
+        _audience_in_h2  = bool(site_data.get("audience_in_h2"))
+        _icp_mentions    = site_data.get("icp_mentions") or []
+        _audience_signal = _audience_in_h2 or bool(_icp_mentions)
+
         if pct is None or pct < 50:
-            recs.append({
-                "priority": "CRITICAL",
-                "action":   f"Rewrite homepage, bio, and social profiles to speak directly to: {icp}",
-                "detail":   (
-                    f"Use the exact language {icp} use to describe their pain points and goals. "
-                    f"Every headline should make ideal buyers think 'this is for me.'"
-                ),
-                "timeline": "1–2 weeks",
-            })
+            if _audience_signal:
+                # Audience IS communicated on the page — recommend
+                # sharpening rather than wholesale rewriting. HIGH
+                # priority not CRITICAL because the foundation is
+                # already there.
+                recs.append({
+                    "priority": "HIGH",
+                    "action":   f"Sharpen the hero copy to name {icp} explicitly + a concrete outcome",
+                    "detail":   (
+                        f"Audience is already communicated (via H2 service "
+                        f"blocks and/or body copy). Tighten the homepage "
+                        f"hero / value-prop line to name {icp} in one "
+                        f"sentence plus the specific outcome (e.g. 'A "
+                        f"financial plan that replaces uncertainty with a "
+                        f"clear next step'). Keeps the working framing "
+                        f"and adds an audience-anchored value statement."
+                    ),
+                    "timeline": "1 week",
+                })
+            else:
+                recs.append({
+                    "priority": "CRITICAL",
+                    "action":   f"Rewrite homepage, bio, and social profiles to speak directly to: {icp}",
+                    "detail":   (
+                        f"Use the exact language {icp} use to describe their pain points and goals. "
+                        f"Every headline should make ideal buyers think 'this is for me.'"
+                    ),
+                    "timeline": "1–2 weeks",
+                })
             recs.append({
                 "priority": "CRITICAL",
                 "action":   f"Create a dedicated content series for {icp}",
