@@ -381,6 +381,18 @@ def _merge_website_data(channel_data: dict, website_audit: dict, base_url: str =
     site["icp_mentions"] = found_icp
     site["target_audience_mentioned"] = ", ".join(found_icp[:4]) if found_icp else ""
 
+    # Expose the full crawled-page text so downstream auditors can scan
+    # it with their own keyword sets (icp_auditor derives keywords from
+    # config.stated_target_market, which the hardcoded icp_keywords list
+    # above doesn't cover). Horizon Advisers 2026-05-18: HA's homepage
+    # said "individuals, families and businesses get their finances in
+    # order" but the icp_auditor only scanned LinkedIn bio + topics for
+    # ICP language, so the report falsely claimed "no ICP language" and
+    # the synthesis recommended adding the exact words already on the
+    # site. Capped at 60KB so a wide Apify crawl doesn't bloat
+    # channel_data (~10-15 pages typical).
+    site["pages_text"] = all_text[:60_000]
+
     # Page list
     site["pages"] = [p.get("url", "") for p in pages if p.get("url")]
 

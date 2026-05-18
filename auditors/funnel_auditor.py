@@ -222,8 +222,40 @@ class FunnelAuditor:
         has_proposal_cta = preloaded.get("website", {}).get("has_proposal_cta", False)
         has_free_trial   = preloaded.get("website", {}).get("has_free_trial", False)
 
+        # Compliance + cannot_verify gating — Horizon Advisers 2026-05-18:
+        # "🟡 No pricing visible. B2B buyers often disqualify vendors who
+        # hide pricing..." shipped to a Financial Advisory firm where
+        # publishing flat-rate pricing is regulated (Form ADV Part 2A).
+        # Same logic for case studies (SEC Marketing Rule). Also respect
+        # cannot_verify_signals so we don't claim absence when pricing
+        # or case_studies are simply unmeasured (JS-hydrated, etc.).
+        _ind        = self.config.industry_category or self.config.client_industry or ""
+        _compliance = get_compliance_framing(_ind)
+        _cv_set     = set(preloaded.get("website", {}).get("cannot_verify_signals") or [])
+        _pricing_cv = "pricing"      in _cv_set
+        _case_cv    = "case_studies" in _cv_set
+
         if has_pricing:
             strengths.append("✅ Pricing info available — removes friction for serious buyers.")
+        elif _compliance:
+            # Industries where public flat-rate pricing is regulated — do
+            # NOT flag absence as a gap. Note in the issues list with the
+            # compliant alternative instead.
+            issues.append(
+                f"🟡 Public pricing not visible — appropriate for "
+                f"{_ind} where fee schedules are filed in regulatory "
+                f"disclosures (e.g. Form ADV Part 2A). Surface a link "
+                f"to your published fee disclosure rather than a "
+                f"flat-rate number."
+            )
+        elif _pricing_cv:
+            issues.append(
+                "🟡 Pricing not detected in the public copy we crawled. "
+                "It may live in image-based menus, third-party widgets, "
+                "or JS-hydrated components our crawler can't read. "
+                "Verify pricing is visible in plain HTML so buyers see "
+                "it at a glance."
+            )
         else:
             issues.append(
                 "🟡 No pricing visible. B2B buyers often "
@@ -232,6 +264,22 @@ class FunnelAuditor:
 
         if has_case_studies:
             strengths.append("✅ Case studies present — critical social proof for B2B conversion.")
+        elif _compliance:
+            issues.append(
+                f"🟡 Client-specific case studies not detected — for "
+                f"{_ind} these are regulated ({_compliance['regulator']}). "
+                f"Consider publishing anonymized case-style narratives "
+                f"with no client identification and no performance "
+                f"claims, reviewed by a compliance officer."
+            )
+        elif _case_cv:
+            issues.append(
+                "🟡 Case studies not detected in the public copy we "
+                "crawled. They may live as PDFs, image-only quotes, or "
+                "JS-hydrated components our crawler can't read. Verify "
+                "case studies appear in plain HTML for AI search engines "
+                "and human visitors."
+            )
         else:
             issues.append(
                 "🔴 No case studies found. Without proof of outcomes for clients in your ICP, "

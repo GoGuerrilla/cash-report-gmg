@@ -366,11 +366,23 @@ class ICPAuditor:
     def _assess_language_alignment(self) -> Dict:
         issues, strengths = [], []
 
-        li       = self.preloaded.get("linkedin", {})
-        bio      = self.linktree.get("bio", "").lower()
-        topics   = " ".join(li.get("content_topics", [])).lower()
+        li        = self.preloaded.get("linkedin", {})
+        bio       = self.linktree.get("bio", "").lower()
+        topics    = " ".join(li.get("content_topics", [])).lower()
         headlines = " ".join(li.get("recent_headlines", [])).lower()
-        all_text = f"{bio} {topics} {headlines}"
+        # Include scraped website pages text so the ICP-keyword check
+        # sees homepage copy too — Horizon Advisers 2026-05-18: HA's
+        # homepage said "individuals, families and businesses get their
+        # finances in order" but the prior version of this method only
+        # scanned LinkedIn bio + topics + headlines and reported "no
+        # ICP language found." run_goguerrilla._merge_website_data now
+        # exposes the crawled pages text as preloaded.website.pages_text
+        # (capped at 60KB) so this scan can use it with the
+        # stated_target_market-derived keywords.
+        website_text = (
+            self.preloaded.get("website", {}).get("pages_text", "") or ""
+        ).lower()
+        all_text = f"{bio} {topics} {headlines} {website_text}"
 
         # Check for ICP-specific language
         icp_hits = _icp_hit_count(all_text, self.keywords)
@@ -386,10 +398,33 @@ class ICPAuditor:
             # because we can't claim the language doesn't match a target
             # we don't know. Suppress the alignment-vs-content claim when
             # the target market itself is the unknown.
-            issues.append(
-                f"🔴 No language specifically targeting '{self.icp}' detected in bio or content. "
-                f"Use the exact words your ideal client uses to describe their own problems."
-            )
+            #
+            # Per Dave 2026-05-18: when website pages were crawled but
+            # ZERO ICP keywords appeared anywhere, soften the framing
+            # because a JS-heavy site may have the ICP language in
+            # hydrated content the static fetch missed. Use NOT DETECTED
+            # 🟡 (renders as "NOT DETECTED" amber badge) instead of
+            # VERIFIED GAP 🔴 so the operator knows this is a maybe-
+            # missed signal, not a confirmed absence.
+            _platform = (
+                self.preloaded.get("website", {}).get("platform") or ""
+            ).lower()
+            _js_blind = _platform in ("", "unknown", "wix", "squarespace",
+                                       "webflow", "shopify")
+            if _js_blind and website_text:
+                issues.append(
+                    f"🟡 No language specifically targeting '{self.icp}' "
+                    f"detected in the public copy we crawled. JS-hydrated "
+                    f"or widget-rendered text on this platform may not "
+                    f"appear in our scan — verify the homepage, bio, and "
+                    f"profile copy includes the exact words '{self.icp}' "
+                    f"or close variants."
+                )
+            else:
+                issues.append(
+                    f"🔴 No language specifically targeting '{self.icp}' detected in bio or content. "
+                    f"Use the exact words your ideal client uses to describe their own problems."
+                )
 
         # Generic/misaligned language check
         general_hits = [s for s in GENERAL_SMB_SIGNALS if s in all_text]
