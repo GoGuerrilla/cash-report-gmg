@@ -388,26 +388,45 @@ class ICPAuditor:
         # "Welcome to Horizon Advisers" didn't contain audience terms,
         # but H2 service blocks did ("Individual Financial Planning",
         # "Employee Benefit Services", "Elder Care and Asset Protection").
-        # Surfaced separately so the strength can name the service-block
-        # signal explicitly — the synthesis then won't recommend stuffing
-        # title/H1 with audience keywords just because they're not in
-        # those specific elements.
+        #
+        # First pass (c7ba724) used stated_target_market-derived
+        # keywords for H2 matching, but those don't match the actual
+        # H2 word forms — HA's stated ICP says "individuals" (plural,
+        # the firm's word) while the H2 says "Individual" (singular,
+        # the service framing); says "businesses" while H2 says
+        # "Employee Benefit"; says "families" while H2 says "Elder
+        # Care". Real-world service-block H2s rarely match the firm's
+        # plural-noun ICP framing literally. Use a hardcoded vocabulary
+        # of common audience terms so the detector catches the actual
+        # H2 patterns regardless of the firm's chosen ICP framing.
+        _AUDIENCE_H2_TERMS = (
+            "individual", "person", "personal",
+            "famil",  # covers family / families
+            "couple",
+            "business", "company", "companies",
+            "employer", "employee", "corporate", "executive",
+            "retiree", "retirement", "elder", "senior",
+            "professional",
+            "physician", "doctor", "medical practitioner",
+            "attorney", "lawyer", "legal practitioner",
+            "founder", "entrepreneur",
+            "homeowner", "home owner",
+            "small business owner", "business owner",
+        )
         h2_text_list = (
             self.preloaded.get("website", {}).get("homepage_h2_text", []) or []
         )
-        h2_text_lower = " ".join(h2_text_list).lower()
-        h2_audience_hits = _icp_hit_count(h2_text_lower, self.keywords)
-        if h2_audience_hits and h2_text_list:
-            # Find which H2s contain audience terms so we can name them
-            # in the strength text — "Individual Financial Planning"
-            # reads better than "individual" alone.
-            matched_h2s = [
-                h for h in h2_text_list
-                if any(kw in h.lower() for kw in h2_audience_hits)
-            ][:3]
+        matched_h2s = []
+        for h2 in h2_text_list:
+            h2_lc = (h2 or "").lower()
+            if any(term in h2_lc for term in _AUDIENCE_H2_TERMS):
+                matched_h2s.append(h2)
+        # Track for the gap-suppression check below
+        h2_audience_hits = bool(matched_h2s)
+        if matched_h2s:
             strengths.append(
                 f"✅ Audience communicated via H2 service blocks: "
-                f"{', '.join(matched_h2s)}"
+                f"{', '.join(matched_h2s[:3])}"
             )
 
         all_text = f"{bio} {topics} {headlines} {website_text}"
