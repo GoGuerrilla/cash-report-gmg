@@ -464,9 +464,17 @@ class GBPAuditor:
         # record so the regex match-confidence problem doesn't apply.
         query = f"{self.name} {domain}"
 
+        # Horizon Advisers 2026-05-18: previous setting was top-1 only.
+        # Apify's Maps actor returned "Horizon Wealth Advisors, LLC"
+        # (correct) one run and "Horizon Financial Associates" (wrong
+        # business) the next run for the same query. Google Maps
+        # ranking varies by Apify-worker geography and time, so the
+        # top-1 result is not stable. Ask for top 5 and iterate; we
+        # likely still find the right listing in positions 2-5 even
+        # when 1 is wrong.
         payload = {
             "searchStringsArray":          [query],
-            "maxCrawledPlacesPerSearch":   1,
+            "maxCrawledPlacesPerSearch":   5,
             "language":                    "en",
             "scrapeReviews":               False,
             "scrapeContacts":              False,
@@ -539,56 +547,83 @@ class GBPAuditor:
         if not items:
             return
 
-        place = items[0] if isinstance(items, list) else None
-        if not isinstance(place, dict):
+        if not isinstance(items, list) or not items:
             return
 
-        # Confirm match — prefer website-domain match over title match.
-        # Reject obviously-wrong results so we never overwrite Tier-2 with
-        # a different business's data, but accept legal-entity / DBA name
-        # variants (Horizon Advisers 2026-05-15: GBP titled "Horizon Wealth
-        # Advisors, LLC" was discarded because strict substring match
-        # failed, even though the place's website matched the submitted
-        # domain exactly).
-        title         = (place.get("title")   or "").lower().strip()
-        place_website = (place.get("website") or "").lower().strip()
-        nm            = self.name.lower().strip()
-        own_domain    = _domain(self.website).lower() if self.website else ""
-        place_domain  = _domain(place_website).lower() if place_website else ""
-        website_match = bool(own_domain and place_domain and own_domain == place_domain)
+        # Iterate the top-N Apify results and pick the first one that
+        # matches by website domain (strongest signal) or by name
+        # (legal-entity-stripped). Horizon Advisers 2026-05-18:
+        # increased from top-1 to top-5 because Google Maps ranking
+        # varies between runs — the right listing is often in
+        # positions 2-5 even when position 1 is a different business.
+        nm         = self.name.lower().strip()
+        own_domain = _domain(self.website).lower() if self.website else ""
+        _LEGAL = re.compile(
+            r"[,.]?\s*\b(llc|l\.l\.c\.|inc|inc\.|corp|corp\.|ltd|"
+            r"ltd\.|co|co\.|company|llp|pllc|plc|pc|p\.c\.)\b\.?",
+            re.I,
+        )
+        nm_stripped = _LEGAL.sub("", nm).strip()
 
-        if website_match:
+        place: Optional[Dict] = None
+        title         = ""
+        place_website = ""
+        place_domain  = ""
+        accept_reason = ""
+        rejected: List[str] = []
+
+        for candidate in items:
+            if not isinstance(candidate, dict):
+                continue
+            c_title    = (candidate.get("title")   or "").lower().strip()
+            c_website  = (candidate.get("website") or "").lower().strip()
+            c_domain   = _domain(c_website).lower() if c_website else ""
+            c_website_match = bool(own_domain and c_domain and own_domain == c_domain)
+            if c_website_match:
+                place         = candidate
+                title         = c_title
+                place_website = c_website
+                place_domain  = c_domain
+                accept_reason = "website_match"
+                break
+            c_title_stripped = _LEGAL.sub("", c_title).strip()
+            c_name_match = bool(
+                c_title and nm and (
+                    nm_stripped in c_title_stripped or
+                    c_title_stripped in nm_stripped
+                )
+            )
+            if c_name_match:
+                place         = candidate
+                title         = c_title
+                place_website = c_website
+                place_domain  = c_domain
+                accept_reason = "name_match"
+                break
+            rejected.append(f"{c_title!r}/{c_domain or '—'}")
+
+        if place is None:
             log.info(
-                "apify_maps: website match — title=%r site=%r (name divergence ok)",
-                title, place_domain,
+                "apify_maps: no match across %d candidates — "
+                "rejected=%s name=%r website=%r",
+                len(items), rejected, nm, own_domain or "—",
+            )
+            return
+
+        if accept_reason == "website_match":
+            log.info(
+                "apify_maps: website match (candidate %d/%d) — "
+                "title=%r site=%r (skipped %d wrong-business results)",
+                items.index(place) + 1, len(items),
+                title, place_domain, len(rejected),
             )
         else:
-            # Strip common legal-entity suffixes before comparing names so
-            # "Horizon Wealth Advisors, LLC" can match "Horizon Advisers".
-            _LEGAL = re.compile(
-                r"[,.]?\s*\b(llc|l\.l\.c\.|inc|inc\.|corp|corp\.|ltd|"
-                r"ltd\.|co|co\.|company|llp|pllc|plc|pc|p\.c\.)\b\.?",
-                re.I,
-            )
-            nm_stripped    = _LEGAL.sub("", nm).strip()
-            title_stripped = _LEGAL.sub("", title).strip()
-            name_match = bool(
-                title and nm and (
-                    nm_stripped in title_stripped or
-                    title_stripped in nm_stripped
-                )
-            )
-            if not name_match:
-                log.info(
-                    "apify_maps: title %r doesn't match name %r "
-                    "and website %r doesn't match %r — discarding result",
-                    title, nm, place_domain or "—", own_domain or "—",
-                )
-                return
             log.info(
-                "apify_maps: name match (legal-entity-stripped) — "
-                "title=%r name=%r",
-                title, nm,
+                "apify_maps: name match (legal-entity-stripped, "
+                "candidate %d/%d) — title=%r name=%r "
+                "(skipped %d wrong-business results)",
+                items.index(place) + 1, len(items),
+                title, nm, len(rejected),
             )
 
         # Promote regex-scraped fields to verified values.
