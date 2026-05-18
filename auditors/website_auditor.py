@@ -880,6 +880,18 @@ class WebsiteAuditor:
             "external_links":          len(all_links) - internal_cnt,
             "cta_count":               cta_count,
             "word_count":              wc,
+            # Horizon Advisers 2026-05-18: the static-fetch path was
+            # returning a page dict with NO 'text' field, so the
+            # downstream _merge_website_data ICP-keyword scan ran
+            # against only title + meta + h1 (~30 words for HA) instead
+            # of the 1021-word page body that BeautifulSoup actually
+            # extracts. ICP keywords like 'individuals', 'families',
+            # 'businesses', 'finances' never matched — even though all
+            # four are in plain HTML on HA's homepage. The Apify path
+            # already includes 'text' (capped at 6000 chars per page,
+            # see _adapt_apify_to_pages); mirror that here so both
+            # paths feed _merge_website_data the same shape.
+            "text":                    (page_text or "")[:6000],
             "has_phone":               has_phone,
             "has_email_visible":       has_email,
             "lead_magnet_url":         lead_magnet_url,
