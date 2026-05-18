@@ -496,6 +496,24 @@ class GEOAuditor:
                 hits = [w for w in self.icp_kws if w in title_l]
                 if hits:
                     strengths.append(f"✅ Title contains ICP keyword(s): {', '.join(sorted(hits)[:4])}")
+                elif self.site.get("audience_in_h2"):
+                    # Horizon Advisers 2026-05-18: title "Pursue Financial
+                    # Confidence | Horizon Advisers" is a benefit-oriented
+                    # framing AND the H2 service blocks already name the
+                    # audiences ("Individual Financial Planning", "Employee
+                    # Benefit Services", "Elder Care and Asset Protection").
+                    # Don't recommend stuffing ICP terms into the title in
+                    # this case — note it softer so the synthesis treats it
+                    # as an A/B testing opportunity, not a critical gap.
+                    score -= 4
+                    issues.append(
+                        "🟡 Title tag uses benefit-oriented framing; audience "
+                        "is communicated via H2 service blocks. Consider "
+                        "A/B-testing a keyword-matched title variant only "
+                        "if Search Console data shows missed impressions "
+                        "for audience-specific queries — don't replace a "
+                        "working value-prop framing on speculation."
+                    )
                 else:
                     score -= 10
                     issues.append("🟡 Title tag lacks target-market keywords — include ICP-specific terms")
@@ -531,6 +549,19 @@ class GEOAuditor:
             strengths.append("✅ Single H1 tag (correct structure)")
             if self.icp_kws and any(w in h1_text for w in self.icp_kws):
                 strengths.append("✅ H1 references ICP-relevant keyword")
+            elif self.site.get("audience_in_h2"):
+                # Same gating logic as the title finding above — when
+                # audience is communicated via H2 service blocks, don't
+                # demand the H1 also include ICP terms. A welcome-style
+                # H1 ("Welcome to Horizon Advisers") plus audience-naming
+                # H2s is a legitimate pattern, not a gap.
+                score -= 3
+                issues.append(
+                    "🟡 H1 uses welcome/brand framing; audience naming "
+                    "is handled by H2 service blocks. Consider adding "
+                    "an ICP-keyword H1 only if competitor research shows "
+                    "keyword-matched H1s ranking better in your niche."
+                )
             else:
                 score -= 8
                 issues.append("🟡 H1 does not reference target market — include ICP keywords in the H1")

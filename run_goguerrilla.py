@@ -407,6 +407,27 @@ def _merge_website_data(channel_data: dict, website_audit: dict, base_url: str =
     # service blocks as a strong secondary signal.
     homepage_h2s = homepage.get("h2_text", []) or []
     site["homepage_h2_text"] = [h for h in homepage_h2s if h]
+    # Boolean flag so multiple auditors (icp_auditor, geo_auditor) can
+    # share the same audience-via-H2 detection without duplicating the
+    # vocabulary. When True, downstream gating can soften "title tag
+    # lacks ICP keywords" / "H1 lacks target market" findings because
+    # audience IS communicated, just not in the title/H1.
+    _AUDIENCE_H2_TERMS = (
+        "individual", "person", "personal",
+        "famil", "couple",
+        "business", "company", "companies",
+        "employer", "employee", "corporate", "executive",
+        "retiree", "retirement", "elder", "senior",
+        "professional",
+        "physician", "doctor",
+        "attorney", "lawyer",
+        "founder", "entrepreneur",
+        "homeowner", "home owner",
+    )
+    site["audience_in_h2"] = any(
+        any(term in (h or "").lower() for term in _AUDIENCE_H2_TERMS)
+        for h in site["homepage_h2_text"]
+    )
 
     # Page list
     site["pages"] = [p.get("url", "") for p in pages if p.get("url")]
