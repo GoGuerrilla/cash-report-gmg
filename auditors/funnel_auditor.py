@@ -424,14 +424,41 @@ class FunnelAuditor:
         _ind        = self.config.industry_category or self.config.client_industry or ""
         _compliance = get_compliance_framing(_ind)
 
+        # Lead-magnet recommendation phrasing — Horizon Advisers
+        # 2026-05-18: the report showed "✓ Lead magnet present on
+        # website" as a strength AND "HIGH — Build a lead magnet
+        # specific to each ICP segment" as a recommendation in the
+        # same funnel section. The rec read as a direct contradiction
+        # of the strength. When a lead magnet IS detected, switch to
+        # additive framing ("add segment-specific lead magnets") so
+        # the rec extends what exists rather than denying it.
+        _has_lead_magnet = bool(
+            self.preloaded.get("website", {}).get("has_lead_magnet", False)
+        )
+        if _has_lead_magnet:
+            _lead_magnet_action  = "Add segment-specific lead magnets for each ICP segment"
+            _lead_magnet_example = (
+                "You have one lead magnet detected — build variants "
+                "for each ICP segment: e.g. a free audit, a '[N] common "
+                "mistakes' guide, a category playbook, or a checklist "
+                "tied to each segment's specific pain points."
+            )
+            _lead_magnet_impact = "Multiplies the email-capture rate across ICP segments"
+        else:
+            _lead_magnet_action  = "Build a lead magnet specific to each ICP segment"
+            _lead_magnet_example = (
+                "e.g. a free audit, a '[N] common mistakes' guide, "
+                "a category playbook, or a checklist tied to your ICP's actual pain points"
+            )
+            _lead_magnet_impact = "Creates email list of warm ICP leads"
+
         recs = [
             {
                 "priority": "HIGH",
-                "action": "Build a lead magnet specific to each ICP segment",
-                "example": "e.g. a free audit, a '[N] common mistakes' guide, "
-                           "a category playbook, or a checklist tied to your ICP's actual pain points",
+                "action":   _lead_magnet_action,
+                "example":  _lead_magnet_example,
                 "timeline": "2-3 weeks",
-                "impact": "Creates email list of warm ICP leads"
+                "impact":   _lead_magnet_impact,
             },
             {
                 "priority": "HIGH",

@@ -372,6 +372,11 @@ def _adapt_apify_to_pages(apify_result: dict) -> List[Dict]:
             "h1_count":                len(h1s),
             "h1_text":                 h1s,
             "h2_count":                len(h2s),
+            # H2 text preserved (Apify-path counterpart of the static-
+            # path "h2_text" field). h2s here is a list of dicts with
+            # "level" + "text" keys — flatten to text strings to keep
+            # the shape consistent with the static path.
+            "h2_text":                 [h.get("text", "") for h in h2s if h.get("text")],
             "canonical_url":           None,
             "is_indexable":            True,
             "has_og_tags":             False,
@@ -866,6 +871,13 @@ class WebsiteAuditor:
             "h1_count":                len(headings["h1s"]),
             "h1_text":                 headings["h1s"],
             "h2_count":                len(headings["h2s"]),
+            # H2 text preserved so the icp_auditor can detect when
+            # service-block H2s communicate audience (Horizon Advisers
+            # 2026-05-18: "Individual Financial Planning", "Employee
+            # Benefit Services", "Elder Care and Asset Protection" all
+            # imply the firm serves individuals + businesses + families,
+            # even though the title/H1 don't literally say so).
+            "h2_text":                 headings["h2s"],
             "canonical_url":           canonical,
             "is_indexable":            robots_m["is_indexable"],
             "has_og_tags":             og.get("present") or False,

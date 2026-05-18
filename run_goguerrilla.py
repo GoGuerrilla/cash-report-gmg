@@ -393,6 +393,21 @@ def _merge_website_data(channel_data: dict, website_audit: dict, base_url: str =
     # channel_data (~10-15 pages typical).
     site["pages_text"] = all_text[:60_000]
 
+    # Homepage H2 service-block text — Horizon Advisers 2026-05-18:
+    # HA's homepage title was "Pursue Financial Confidence | Horizon
+    # Advisers" and H1 was "Welcome to Horizon Advisers" (neither
+    # contained ICP terms), but the H2 service blocks named the
+    # audiences directly ("Individual Financial Planning", "Employee
+    # Benefit Services", "Elder Care and Asset Protection"). Without
+    # exposing these to icp_auditor, it falsely treated the page as
+    # having no audience signal, and the synthesis recommended
+    # stuffing ICP terms into the title — a poor SEO rec given the
+    # benefit-oriented title was working. Surface the homepage H2s
+    # explicitly so icp_auditor can score audience communication via
+    # service blocks as a strong secondary signal.
+    homepage_h2s = homepage.get("h2_text", []) or []
+    site["homepage_h2_text"] = [h for h in homepage_h2s if h]
+
     # Page list
     site["pages"] = [p.get("url", "") for p in pages if p.get("url")]
 

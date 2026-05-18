@@ -382,6 +382,34 @@ class ICPAuditor:
         website_text = (
             self.preloaded.get("website", {}).get("pages_text", "") or ""
         ).lower()
+        # Homepage H2 service-block text — strong audience signal when
+        # title/H1 don't include ICP terms. Horizon Advisers 2026-05-18:
+        # HA's homepage title "Pursue Financial Confidence" and H1
+        # "Welcome to Horizon Advisers" didn't contain audience terms,
+        # but H2 service blocks did ("Individual Financial Planning",
+        # "Employee Benefit Services", "Elder Care and Asset Protection").
+        # Surfaced separately so the strength can name the service-block
+        # signal explicitly — the synthesis then won't recommend stuffing
+        # title/H1 with audience keywords just because they're not in
+        # those specific elements.
+        h2_text_list = (
+            self.preloaded.get("website", {}).get("homepage_h2_text", []) or []
+        )
+        h2_text_lower = " ".join(h2_text_list).lower()
+        h2_audience_hits = _icp_hit_count(h2_text_lower, self.keywords)
+        if h2_audience_hits and h2_text_list:
+            # Find which H2s contain audience terms so we can name them
+            # in the strength text — "Individual Financial Planning"
+            # reads better than "individual" alone.
+            matched_h2s = [
+                h for h in h2_text_list
+                if any(kw in h.lower() for kw in h2_audience_hits)
+            ][:3]
+            strengths.append(
+                f"✅ Audience communicated via H2 service blocks: "
+                f"{', '.join(matched_h2s)}"
+            )
+
         all_text = f"{bio} {topics} {headlines} {website_text}"
 
         # Check for ICP-specific language
@@ -390,9 +418,14 @@ class ICPAuditor:
             strengths.append(
                 f"✅ ICP-relevant language in bio/content: {', '.join(icp_hits[:5])}"
             )
-        elif self.has_stated_icp:
+        elif self.has_stated_icp and not h2_audience_hits:
             # Only fire this gap when we actually have a stated ICP to
-            # compare against. Per Dave 2026-05-11: GMG audit showed both
+            # compare against AND no H2 service block names the audience.
+            # Per Dave 2026-05-18: Horizon Advisers homepage communicated
+            # audience via H2 service blocks ("Individual Financial
+            # Planning", "Employee Benefit Services") — surfacing the
+            # H2 strength above is sufficient; no separate gap finding.
+            # Per Dave 2026-05-11: GMG audit showed both
             # "No language specifically targeting 'your ideal client'"
             # AND "No target market provided" — logically incoherent
             # because we can't claim the language doesn't match a target
