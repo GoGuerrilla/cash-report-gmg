@@ -11,6 +11,7 @@ content alignment throughout.
 import re
 from typing import Dict, Any, List
 from config import ClientConfig
+from auditors.industry_benchmarks import get_compliance_framing
 
 # ── Generic SMB / broad-audience signals ──────────────────────
 # These indicate the content is written for a general audience rather
@@ -564,14 +565,38 @@ class ICPAuditor:
             "timeline": "2–3 weeks",
         })
 
-        recs.append({
-            "priority": "MEDIUM",
-            "action":   f"Build a case study page showing results for {icp}",
-            "detail":   (
-                "B2B buyers require proof before hiring. One detailed case study with "
-                "before/after metrics is worth 100 generic testimonials."
-            ),
-            "timeline": "3–4 weeks",
-        })
+        # Industry-aware case-study rec — Horizon Advisers 2026-05-18:
+        # this hardcoded recommendation shipped to a Financial Advisory
+        # firm with "before/after metrics" framing despite the synthesis
+        # compliance directive, because the row is built here rule-based
+        # and bypasses the AI. For industries with advertising/endorsement
+        # rules (Financial Advisory, Legal, Healthcare & Medical,
+        # Accounting & CPA), substitute a compliant alternative that
+        # avoids client-specific outcome claims.
+        _ind        = self.config.industry_category or self.config.client_industry or ""
+        _compliance = get_compliance_framing(_ind)
+        if _compliance:
+            recs.append({
+                "priority": "MEDIUM",
+                "action":   f"Publish anonymized case-style narratives relevant to {icp}",
+                "detail":   (
+                    f"Industry compliance ({_compliance['regulator']}) "
+                    f"restricts client-specific outcome claims. Use "
+                    f"anonymized narratives with no client identification "
+                    f"and no performance numbers, reviewed by a compliance "
+                    f"officer before publishing."
+                ),
+                "timeline": "3–4 weeks",
+            })
+        else:
+            recs.append({
+                "priority": "MEDIUM",
+                "action":   f"Build a case study page showing results for {icp}",
+                "detail":   (
+                    "B2B buyers require proof before hiring. One detailed case study with "
+                    "before/after metrics is worth 100 generic testimonials."
+                ),
+                "timeline": "3–4 weeks",
+            })
 
         return recs

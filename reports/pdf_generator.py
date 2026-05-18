@@ -18,6 +18,11 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from config import ClientConfig
+from auditors.industry_benchmarks import (
+    get_retention_framing,
+    get_self_reference,
+    get_compliance_framing,
+)
 
 _LOGO_SEARCH = [
     "/Users/davidsuppnick/Desktop/CASH GMG Audit/gmg_logo.png",
@@ -1483,16 +1488,78 @@ class PDFReportGenerator:
             nurture.get("strengths", []) + trust.get("strengths", []),
         )
 
-        # Standard hold recommendations
+        # Industry-aware hold recommendations — Horizon Advisers 2026-05-18:
+        # the hardcoded "Offer 1 free month for every referred client" and
+        # "Introduce agency" Details shipped to a Financial Advisory firm
+        # because these rows are rendered directly here, bypassing the AI
+        # synthesis and its compliance/self-reference/retention directives.
+        # Now keyed off the canonical industry via industry_benchmarks
+        # helpers so regulated industries get compliant variants.
+        _ind        = self.config.industry_category or self.config.client_industry or ""
+        _retention  = get_retention_framing(_ind)
+        _self_ref   = get_self_reference(_ind) or "the business"
+        _compliance = get_compliance_framing(_ind)
+
+        # Welcome sequence Detail — substitute "agency" with industry-
+        # appropriate self-reference. For regulated industries also drop
+        # "share case study" (compliance constraints on outcome claims).
+        if _compliance:
+            _welcome_detail = (
+                f"Introduce {_self_ref}, share educational value, "
+                f"offer discovery call. Avoid client-specific outcome "
+                f"claims pending compliance review."
+            )
+        else:
+            _welcome_detail = f"Introduce {_self_ref}, share case study, book discovery call."
+
+        # Referral program Detail — substitute "Offer 1 free month" with
+        # an industry-native retention mechanic. Pull the first acceptable
+        # framing from the retention table (which Financial Advisory has
+        # as "complimentary planning review for the referrer", etc.).
+        if _retention and _retention.get("acceptable"):
+            _first_acceptable = (
+                _retention["acceptable"].split(",")[0].strip().rstrip(".")
+            )
+            _referral_detail = (
+                f"Use an industry-native mechanic such as "
+                f"\"{_first_acceptable}\"."
+            )
+        else:
+            _referral_detail = (
+                "Reward the referrer with a credit or perk that fits "
+                "your revenue model."
+            )
+
+        # Newsletter / testimonials Details — strip the "case study"
+        # default for regulated industries (compliance constraint).
+        if _compliance:
+            _newsletter_detail = (
+                "Mix of value-tips, educational content, and category "
+                "news your ICP cares about."
+            )
+            _testimonial_detail = (
+                "Anonymized testimonial summaries — for regulated "
+                "industries, confirm disclosure language with a "
+                "compliance officer before publishing."
+            )
+        else:
+            _newsletter_detail = (
+                "Mix of value-tips, case studies, and category news "
+                "your ICP cares about."
+            )
+            _testimonial_detail = (
+                "2–3 sentence quote + permission for website and LinkedIn."
+            )
+
         hold_rec_rows = "".join([
             _rec_row("HIGH",   "Build a 5-email welcome sequence",
-                     "Introduce agency, share case study, book discovery call.", "2 weeks"),
+                     _welcome_detail, "2 weeks"),
             _rec_row("HIGH",   "Launch a client referral program",
-                     "Offer 1 free month for every referred client who signs.", "1 month"),
+                     _referral_detail, "1 month"),
             _rec_row("MEDIUM", "Biweekly email newsletter",
-                     "Mix of value-tips, case studies, and category news your ICP cares about.", "2–4 weeks"),
+                     _newsletter_detail, "2–4 weeks"),
             _rec_row("MEDIUM", "Collect testimonials from every client",
-                     "2–3 sentence quote + permission for website and LinkedIn.", "2 weeks"),
+                     _testimonial_detail, "2 weeks"),
         ])
         body += f'{_sub("Retention Recommendations")}{_rec_table(hold_rec_rows)}'
 

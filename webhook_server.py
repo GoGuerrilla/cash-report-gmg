@@ -382,9 +382,33 @@ def _infer_industry(
     # ── Professional Services (canonical sub-buckets) ─────────────
     # 'ria firm' and 'ria advisor' (not bare 'ria') because 'ria' as a substring
     # collides with words like 'pizzeria', 'nigeria', etc.
-    if any(k in haystack for k in ("financial advisor", "ria firm", "ria advisor",
-                                     "registered investment advisor", "wealth manag",
-                                     "fiduciary", "fractional cfo")):
+    # Horizon Advisers 2026-05-18: intake-time inference returned 'Other'
+    # because the prior keyword set required US spellings ('advisor') and
+    # very specific phrases ('financial advisor', 'wealth management').
+    # HA's target market 'We help individuals, families and businesses
+    # get their finances in order' + business name 'Horizon Advisers'
+    # matched nothing, so the synthesis prompt rendered the 'Other'
+    # branch with no compliance/retention/self-reference directives.
+    # Adding: UK spellings ('adviser'/'advisers'), planning/investment/
+    # asset-management variants, common advisory-firm self-descriptions,
+    # and 'finances' as a strong domain signal.
+    if any(k in haystack for k in (
+        "financial advisor", "financial adviser", "financial advisors",
+        "financial advisers", "financial planner", "financial planning",
+        "financial services", "financial advice", "financial firm",
+        "financial confidence", "finances in order", "personal finance",
+        "investment advisor", "investment adviser",
+        "investment management", "investment manager",
+        "wealth manag", "wealth advisor", "wealth adviser",
+        "asset management", "asset manag", "portfolio manag",
+        "retirement planning", "retirement planner",
+        "ria firm", "ria advisor", "ria adviser",
+        "registered investment advisor", "registered investment adviser",
+        "advisory firm", "advisory practice", "advisory services",
+        "fiduciary", "fractional cfo",
+        "certified financial planner", "cfp ",
+        "chartered financial analyst", "cfa ",
+    )):
         return "Financial Advisory", "Financial Advisory"
     if any(k in haystack for k in ("attorney", "law firm", "lawyer", "legal services",
                                      "legal practice")):

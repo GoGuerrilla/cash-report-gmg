@@ -5,6 +5,7 @@ awareness → interest → consideration → contact/conversion.
 """
 from typing import Dict, Any, List
 from config import ClientConfig
+from auditors.industry_benchmarks import get_compliance_framing
 
 
 
@@ -365,7 +366,17 @@ class FunnelAuditor:
         return "F"
 
     def _recommendations(self, capture: Dict, nurture: Dict, conversion: Dict) -> List[Dict]:
-        return [
+        # Industry-aware funnel recs. Horizon Advisers 2026-05-18 shipped
+        # with hardcoded "Add visible pricing or 'Starting from $X/month'"
+        # to a Financial Advisory firm — fee-only/AUM firms can't display
+        # flat-rate pricing publicly (fee schedules live in Form ADV
+        # Part 2A) AND the previous "Publish 1-2 case studies... use real
+        # numbers" rec invited SEC Marketing Rule violations. Substitute
+        # compliant variants for regulated industries.
+        _ind        = self.config.industry_category or self.config.client_industry or ""
+        _compliance = get_compliance_framing(_ind)
+
+        recs = [
             {
                 "priority": "HIGH",
                 "action": "Build a lead magnet specific to each ICP segment",
@@ -388,19 +399,50 @@ class FunnelAuditor:
                 "timeline": "2-4 weeks",
                 "impact": "Captures and warms leads over the 60-180 day financial B2B sales cycle"
             },
-            {
+        ]
+
+        if _compliance:
+            # Compliance-safe variants for Financial Advisory / Legal /
+            # Healthcare / Accounting.
+            recs.append({
+                "priority": "MEDIUM",
+                "action": "Publish anonymized client-style narratives on the website",
+                "example": (
+                    f"Industry compliance ({_compliance['regulator']}) "
+                    f"restricts client-specific outcome claims. Use "
+                    f"anonymized narratives with no client identification "
+                    f"and no performance numbers, reviewed by a compliance "
+                    f"officer before publishing."
+                ),
+                "timeline": "1-2 months",
+                "impact": "Builds buyer confidence within regulatory guardrails"
+            })
+            recs.append({
+                "priority": "MEDIUM",
+                "action": "Reference your published fee schedule on the homepage",
+                "example": (
+                    "Link to Form ADV Part 2A / your engagement letter / "
+                    "fee schedule rather than displaying flat-rate pricing "
+                    "publicly. Transparency without violating disclosure rules."
+                ),
+                "timeline": "1 week",
+                "impact": "Pre-qualifies leads while staying compliant"
+            })
+        else:
+            recs.append({
                 "priority": "MEDIUM",
                 "action": "Publish 1-2 case studies per ICP segment on the website",
                 "example": "Format: How we helped [client / segment] achieve [specific outcome] in [timeframe]. "
                            "Use real numbers when possible.",
                 "timeline": "1-2 months",
                 "impact": "Single biggest conversion lever for B2B and high-consideration buyers"
-            },
-            {
+            })
+            recs.append({
                 "priority": "MEDIUM",
                 "action": "Add visible pricing or 'starting from' range",
                 "example": "e.g. 'Starting from $X/month' or '$X–$Y per project' — even a range builds trust.",
                 "timeline": "1 week",
                 "impact": "Pre-qualifies leads and reduces friction with detail-oriented buyers"
-            },
-        ]
+            })
+
+        return recs

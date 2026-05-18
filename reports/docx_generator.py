@@ -14,6 +14,11 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
 from config import ClientConfig
+from auditors.industry_benchmarks import (
+    get_retention_framing,
+    get_self_reference,
+    get_compliance_framing,
+)
 
 # ── Palette ────────────────────────────────────────────────────
 NAVY   = "1B2A4A"
@@ -1055,21 +1060,71 @@ class DocxReportGenerator:
             nurture.get("issues", []) + trust.get("issues", []),
             nurture.get("strengths", []) + trust.get("strengths", []))
 
-        # Hold recommendations
+        # Hold recommendations — industry-aware so the regulated-industry
+        # variants don't ship "Offer 1 free month" / "Introduce the agency"
+        # to a Financial Advisory / Legal / Healthcare / Accounting client
+        # (same fix as pdf_generator.py:1486+ for the same templates).
         self._subsection(doc, "Retention Recommendations")
+        _ind        = self.config.industry_category or self.config.client_industry or ""
+        _retention  = get_retention_framing(_ind)
+        _self_ref   = get_self_reference(_ind) or "the business"
+        _compliance = get_compliance_framing(_ind)
+
+        if _compliance:
+            _welcome_detail = (
+                f"Introduce {_self_ref}, share educational value, "
+                f"and offer a discovery call. Avoid client-specific "
+                f"outcome claims pending compliance review."
+            )
+        else:
+            _welcome_detail = (
+                f"Introduce {_self_ref}, share a case study, and "
+                f"book a discovery call."
+            )
+
+        if _retention and _retention.get("acceptable"):
+            _first_acceptable = (
+                _retention["acceptable"].split(",")[0].strip().rstrip(".")
+            )
+            _referral_detail = (
+                f"Use an industry-native mechanic such as "
+                f"\"{_first_acceptable}\"."
+            )
+        else:
+            _referral_detail = (
+                "Reward the referrer with a credit or perk that fits "
+                "your revenue model."
+            )
+
+        if _compliance:
+            _newsletter_detail = (
+                "Mix of value-tips, educational content, and category "
+                "news your ICP cares about."
+            )
+            _testimonial_detail = (
+                "Anonymized testimonial summaries — for regulated "
+                "industries, confirm disclosure language with a "
+                "compliance officer before publishing."
+            )
+        else:
+            _newsletter_detail = (
+                "Mix of value-tips, case studies, and category news "
+                "your ICP cares about."
+            )
+            _testimonial_detail = (
+                "Ask for a 2-3 sentence quote + permission to use on "
+                "website and LinkedIn."
+            )
+
         hold_recs = [
             ("HIGH",   "Build a 5-email welcome sequence for new leads",
-             "Introduce the agency, share a case study, and book a discovery call.",
-             "2 weeks"),
+             _welcome_detail, "2 weeks"),
             ("HIGH",   "Launch a client referral program",
-             "Offer 1 free month of service for every referred client who signs on.",
-             "1 month"),
+             _referral_detail, "1 month"),
             ("MEDIUM", "Start a biweekly email newsletter",
-             "Mix of value-tips, case studies, and category news your ICP cares about.",
-             "2-4 weeks"),
+             _newsletter_detail, "2-4 weeks"),
             ("MEDIUM", "Collect testimonials from every current client",
-             "Ask for a 2-3 sentence quote + permission to use on website and LinkedIn.",
-             "2 weeks"),
+             _testimonial_detail, "2 weeks"),
         ]
         self._detail_table(doc, ["PRIORITY", "ACTION", "DETAIL", "TIMELINE"],
                            hold_recs, col_widths=[Inches(0.7), Inches(2.0), Inches(2.4), Inches(0.9)])
