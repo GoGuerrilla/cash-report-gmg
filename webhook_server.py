@@ -571,7 +571,20 @@ def _stage4_verify(audit_data: dict) -> List[Dict]:
         "pricing":        ["no visible pricing", "add visible pricing",
                            "missing pricing", "show pricing", "publish pricing"],
         "blog":           ["no blog", "add a blog", "start a blog",
-                           "create a blog", "missing blog"],
+                           "create a blog", "missing blog",
+                           # Dave 2026-05-19 (Awake Tech / Bullish on Business
+                           # HOLD): synthesis used "no blog or content hub
+                           # detected" framing across biggest_opportunity +
+                           # content_strategy. Catch the content-hub variant
+                           # and a few other "no blog detected" framings.
+                           "no blog or content hub",
+                           "no content hub",
+                           "no blog detected",
+                           "no blog visible",
+                           "blog not detected",
+                           "without a blog",
+                           "publish a blog",
+                           "launch a blog"],
         # Stage 2 v3 (Dave 2026-05-11 — GMG GTM report). H1 and CTA
         # detection both blind-spot on Wix JS-hydrated widgets. Phrasing
         # in the GMG synthesis: "ADD A KEYWORD-MATCHED H1 HEADING —

@@ -782,6 +782,17 @@ CONCRETE EXAMPLES of the failure mode this directive prevents:
      (lead_magnet in UNMEASURED SIGNALS → say "Verify the email opt-in
       survives static HTML rendering; surface it more prominently if
       it exists")
+  ❌ "NO BLOG OR CONTENT HUB DETECTED" / "WITH NO BLOG DETECTED IN
+     CRAWLABLE HTML" / "NO BLOG VISIBLE" / "MISSING BLOG"
+     (blog in UNMEASURED SIGNALS → say "Verify your blog or content
+      hub appears in plain HTML at a discoverable URL; on JS-heavy
+      platforms blog content sometimes lives in a subdomain or CMS
+      pattern our crawler doesn't reach. If a blog exists, link to it
+      from the homepage in plain HTML.")
+     The phrase "no blog or content hub detected" is forbidden as
+     evidence for ANY recommendation — including biggest_opportunity
+     and content_strategy. Substitute "verify the blog is reachable
+     in static HTML" framing.
 
 This rule is non-negotiable — it's the report's integrity layer and
 Stage 4 will HOLD the report if you violate it. Recommending the
