@@ -598,8 +598,22 @@ def _stage4_verify(audit_data: dict) -> List[Dict]:
         "cta":            ["no cta", "few cta", "add a cta", "add a button",
                            "missing cta", "no call-to-action",
                            "add a call-to-action", "few calls-to-action",
-                           "no clear cta", "add a plain-text",
-                           "add a 'get", "currently no cta"],
+                           "no clear cta",
+                           # Dave 2026-05-19 (The Folded Leaf HOLD): the
+                           # bare "add a plain-text" token false-positived
+                           # on a synthesis rec to "add a plain-text /about
+                           # page and a plain-text /services page" — that's
+                           # a legitimate page-creation rec, not a CTA
+                           # violation. Replace bare match with CTA-context-
+                           # specific variants so we only fire when the AI
+                           # is actually recommending a CTA / button.
+                           "add a plain-text cta",
+                           "add a plain-text call-to-action",
+                           "add a plain-text button",
+                           "add a plain-text 'get",
+                           "add a plain text cta",
+                           "add plain-text cta",
+                           "currently no cta"],
     }
 
     # Fields to scan — synthesis output where contradictions would show.
