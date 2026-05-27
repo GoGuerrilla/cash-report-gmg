@@ -1274,7 +1274,7 @@ Respond with ONLY this exact JSON (no markdown fences, no extra keys):
         intake_mods     = self._apply_intake_modifiers(config, cash)
         # cash dict is mutated in place by _apply_intake_modifiers; overall is recomputed
         score     = cash["overall"]
-        grade     = "A" if score >= 80 else "B" if score >= 65 else "C" if score >= 50 else "D" if score >= 35 else "F"
+        grade     = "A" if score >= 90 else "B" if score >= 80 else "C" if score >= 70 else "D" if score >= 60 else "F"
         icp_verdict = audit_data.get("icp", {}).get("icp_verdict", "")
 
         icp    = audit_data.get("icp", {})

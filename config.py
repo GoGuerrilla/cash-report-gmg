@@ -3,11 +3,11 @@ from typing import List, Dict, Any
 
 
 def grade(score: int) -> str:
-    """Universal grade function: A=80+, B=65+, C=50+, D=35+, F=below 35."""
-    if score >= 80: return "A"
-    if score >= 65: return "B"
-    if score >= 50: return "C"
-    if score >= 35: return "D"
+    """Universal grade function: A=90+, B=80+, C=70+, D=60+, F=below 60."""
+    if score >= 90: return "A"
+    if score >= 80: return "B"
+    if score >= 70: return "C"
+    if score >= 60: return "D"
     return "F"
 
 

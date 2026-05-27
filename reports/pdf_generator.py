@@ -265,10 +265,10 @@ def _h(text) -> str:
 
 def _grade(score) -> str:
     s = int(score) if score is not None else 0
-    if s >= 80: return "A"
-    if s >= 65: return "B"
-    if s >= 50: return "C"
-    if s >= 35: return "D"
+    if s >= 90: return "A"
+    if s >= 80: return "B"
+    if s >= 70: return "C"
+    if s >= 60: return "D"
     return "F"
 
 

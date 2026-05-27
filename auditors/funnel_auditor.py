@@ -407,10 +407,10 @@ class FunnelAuditor:
         return max(30, min(100, base)) if has_real_data else 50
 
     def _grade(self, score: int) -> str:
-        if score >= 80: return "A"
-        if score >= 65: return "B"
-        if score >= 50: return "C"
-        if score >= 35: return "D"
+        if score >= 90: return "A"
+        if score >= 80: return "B"
+        if score >= 70: return "C"
+        if score >= 60: return "D"
         return "F"
 
     def _recommendations(self, capture: Dict, nurture: Dict, conversion: Dict) -> List[Dict]:

@@ -374,10 +374,10 @@ class BrandAuditor:
         return score
 
     def _grade(self, score: int) -> str:
-        if score >= 80: return "A"
-        if score >= 65: return "B"
-        if score >= 50: return "C"
-        if score >= 35: return "D"
+        if score >= 90: return "A"
+        if score >= 80: return "B"
+        if score >= 70: return "C"
+        if score >= 60: return "D"
         return "F"
 
     def _recommendations(self, platform_fit: Dict, bio_analysis: Dict) -> List[Dict]:
