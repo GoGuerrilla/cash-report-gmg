@@ -648,7 +648,7 @@ class PDFReportGenerator:
 
     def _overall_banner(self) -> str:
         score = self.cash["overall"]
-        g     = self.ai.get("overall_grade", _grade(score))
+        g     = _grade(score)
         # Prefer cover_topline (purpose-built complete sentence ≤180 chars).
         # Fall back to executive_summary with word-boundary truncation when an
         # older synthesis response or a parse-error path didn't produce it.
@@ -849,7 +849,7 @@ class PDFReportGenerator:
     def _page_executive(self) -> str:
         ai    = self.ai
         score = self.cash["overall"]
-        g     = ai.get("overall_grade", _grade(score))
+        g     = _grade(score)
         exec_sum  = ai.get("executive_summary", "")
         opp       = ai.get("biggest_opportunity", "")
         waste     = ai.get("biggest_waste", "")
