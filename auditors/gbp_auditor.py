@@ -151,12 +151,14 @@ def _domain(url: str) -> str:
 class GBPAuditor:
     def __init__(
         self,
-        business_name: str,
-        website_url:   str = "",
-        api_key:       str = "",   # accepted for backwards compatibility, not used
+        business_name:    str,
+        website_url:      str = "",
+        api_key:          str = "",   # accepted for backwards compatibility, not used
+        pinned_place_id:  str = "",   # Google Maps placeId from a prior confirmed run
     ):
-        self.name    = business_name.strip()
-        self.website = website_url.strip().rstrip("/")
+        self.name           = business_name.strip()
+        self.website        = website_url.strip().rstrip("/")
+        self.pinned_place_id = pinned_place_id.strip()
 
     # ── Public entry point ─────────────────────────────────────
 
@@ -189,6 +191,8 @@ class GBPAuditor:
             "review_count_method":   "none", # "regex_scrape" when extracted
             # Derived
             "nap_consistent":       False,
+            # Apify-confirmed Google Maps place ID (ChIJ... format); stored for PIN reuse
+            "place_id":             "",
         }
 
         # ── Tier 1: website ────────────────────────────────────
@@ -459,28 +463,33 @@ class GBPAuditor:
         if not domain:
             return
 
-        # Query: "<name> <domain>" — same disambiguation pattern used by
-        # _try_maps_search after 6e046ee. Apify returns a structured
-        # record so the regex match-confidence problem doesn't apply.
-        query = f"{self.name} {domain}"
-
-        # Horizon Advisers 2026-05-18: previous setting was top-1 only.
-        # Apify's Maps actor returned "Horizon Wealth Advisors, LLC"
-        # (correct) one run and "Horizon Financial Associates" (wrong
-        # business) the next run for the same query. Google Maps
-        # ranking varies by Apify-worker geography and time, so the
-        # top-1 result is not stable. Ask for top 5 and iterate; we
-        # likely still find the right listing in positions 2-5 even
-        # when 1 is wrong.
-        payload = {
-            "searchStringsArray":          [query],
-            "maxCrawledPlacesPerSearch":   5,
-            "language":                    "en",
-            "scrapeReviews":               False,
-            "scrapeContacts":              False,
-            "scrapeImageAuthors":          False,
-            "exportPlaceUrls":             False,
-        }
+        if self.pinned_place_id:
+            # Pinned mode: go directly to the confirmed listing — fully
+            # deterministic, no text search, no ranking variance between runs.
+            # placeIds input is supported by compass~crawler-google-places.
+            payload = {
+                "placeIds":          [self.pinned_place_id],
+                "language":          "en",
+                "scrapeReviews":     False,
+                "scrapeContacts":    False,
+                "scrapeImageAuthors": False,
+                "exportPlaceUrls":   False,
+            }
+            log.info("apify_maps: using pinned placeId=%r for %r", self.pinned_place_id, self.name)
+        else:
+            # Text-search mode: "<name> <domain>" disambiguation.
+            # Ask for top 5 because Google Maps ranking varies by
+            # Apify-worker geography — right listing is often in positions 2-5.
+            query = f"{self.name} {domain}"
+            payload = {
+                "searchStringsArray":          [query],
+                "maxCrawledPlacesPerSearch":   5,
+                "language":                    "en",
+                "scrapeReviews":               False,
+                "scrapeContacts":              False,
+                "scrapeImageAuthors":          False,
+                "exportPlaceUrls":             False,
+            }
 
         # Iterate the slug-fallback chain — Apify periodically renames or
         # republishes the Compass Maps actors. On HTTP 404 (actor not found
@@ -626,6 +635,11 @@ class GBPAuditor:
                 title, nm, len(rejected),
             )
 
+        # Capture the Google Maps place ID for future pinned runs.
+        if place.get("placeId"):
+            signals["place_id"] = str(place["placeId"]).strip()
+            log.info("apify_maps: captured placeId=%r for future PIN", signals["place_id"])
+
         # Promote regex-scraped fields to verified values.
         if place.get("totalScore") is not None:
             try:
@@ -757,6 +771,7 @@ class GBPAuditor:
             "services_listed":    [],
             "last_post_date":     None,
             "post_note":          "GBP posts require Google My Business API (OAuth2).",
+            "place_id":           s.get("place_id", ""),
             "completeness_pct":   completeness_pct,
             "nap_consistent":     s["nap_consistent"],
             "site_phone":         s["site_phone"],

@@ -35,6 +35,7 @@ Environment variables
 """
 import sqlite3
 import os
+import re
 from datetime import datetime, date
 from typing import Optional, Dict, Any, List
 
@@ -102,6 +103,7 @@ def ensure_schema():
             ("phone_number",      "TEXT"),
             ("marketing_consent", "INTEGER"),
             ("overall_score",     "REAL"),
+            ("gbp_place_id",      "TEXT"),
         ]:
             if col not in existing:
                 conn.execute(f"ALTER TABLE clients ADD COLUMN {col} {defn}")
@@ -147,6 +149,35 @@ def save_intake_record(
         return cur.lastrowid
 
 
+def get_gbp_place_id(website: str) -> str:
+    """
+    Return the most recently confirmed Google Maps placeId for this website,
+    or "" if none has been recorded yet.
+    Used to pin the GBP auditor to the same listing across repeat runs.
+    """
+    if not website:
+        return ""
+    # Normalise: strip scheme and trailing slash so http/https variants match
+    normalized = re.sub(r"^https?://", "", website.lower()).rstrip("/")
+    try:
+        ensure_schema()
+        with _connect() as conn:
+            row = conn.execute(
+                """
+                SELECT gbp_place_id FROM clients
+                WHERE LOWER(REPLACE(REPLACE(website, 'https://', ''), 'http://', '')) = ?
+                  AND gbp_place_id IS NOT NULL
+                  AND gbp_place_id <> ''
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (normalized,),
+            ).fetchone()
+        return row["gbp_place_id"] if row else ""
+    except Exception:
+        return ""
+
+
 def save_audit_result(
     client_name:   str,
     email:         str,
@@ -156,6 +187,7 @@ def save_audit_result(
     ai_insights:   Dict[str, Any],
     report_path:   str = "",
     audit_date:    Optional[str] = None,
+    gbp_place_id:  str = "",
 ) -> int:
     """
     Insert one audit record and return the new row id.
@@ -188,6 +220,7 @@ def save_audit_result(
         "brand_score":   int(audit_data.get("brand", {}).get("score", 0)),
         "seo_score":     int(audit_data.get("seo",   {}).get("score", 0)),
         "geo_score":     int(audit_data.get("geo",   {}).get("score", 0)),
+        "gbp_place_id":  gbp_place_id or None,
         "created_at":    now,
     }
 
@@ -198,13 +231,13 @@ def save_audit_result(
                 audit_score, audit_grade, audit_date, report_path,
                 cash_c, cash_a, cash_s, cash_h,
                 icp_score, brand_score, seo_score, geo_score,
-                created_at
+                gbp_place_id, created_at
             ) VALUES (
                 :client_name, :email, :business_type, :website,
                 :audit_score, :audit_grade, :audit_date, :report_path,
                 :cash_c, :cash_a, :cash_s, :cash_h,
                 :icp_score, :brand_score, :seo_score, :geo_score,
-                :created_at
+                :gbp_place_id, :created_at
             )
         """, row)
         conn.commit()

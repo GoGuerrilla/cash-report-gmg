@@ -158,7 +158,7 @@ from analyzers.ai_analyzer import AIAnalyzer
 from reports.pdf_generator import PDFReportGenerator
 from reports.docx_generator import DocxReportGenerator
 from reports.email_sender import send_report
-from intake.client_db import save_audit_result, get_opted_in_emails, list_clients
+from intake.client_db import save_audit_result, get_opted_in_emails, list_clients, get_gbp_place_id
 from intake.rate_limiter import RateLimiter, get_public_ip
 from run_goguerrilla import _build_base_channel_data, _merge_website_data
 
@@ -1526,9 +1526,13 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
                                 lambda: WebsiteAuditor(target_url, max_pages=5).run(), _NEUTRAL)
             fut_seo = ex.submit(_safe_audit_timed, "seo",
                                 lambda: SEOAuditor(target_url, api_key=pagespeed_key).run(), _NEUTRAL)
+            _pinned_place_id = get_gbp_place_id(target_url)
+            if _pinned_place_id:
+                log.info("GBP: using pinned placeId=%r for %r", _pinned_place_id, name)
             fut_gbp = ex.submit(_safe_audit_timed, "gbp",
                                 lambda: GBPAuditor(business_name=name, website_url=target_url,
-                                                   api_key=places_key).run(), _NEUTRAL)
+                                                   api_key=places_key,
+                                                   pinned_place_id=_pinned_place_id).run(), _NEUTRAL)
             fut_ga  = ex.submit(_safe_audit_timed, "analytics",
                                 lambda: AnalyticsAuditor(property_id=ga_prop,
                                                          service_account_json_path=ga_sa).run(),
@@ -2096,6 +2100,7 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
             audit_data    = audit_data,
             ai_insights   = audit_data.get("ai_insights", {}),
             report_path   = report_attachment,
+            gbp_place_id  = audit_data.get("gbp", {}).get("place_id", ""),
         )
         log.info("TIMING  db_save                 %.2fs  row=#%s", time.time() - _t, row_id)
     except Exception as e:
