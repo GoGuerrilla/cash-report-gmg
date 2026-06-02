@@ -581,6 +581,9 @@ class GBPAuditor:
         accept_reason = ""
         rejected: List[str] = []
 
+        # Phone from website scrape (already populated by Tier 1 before we get here)
+        own_phone = _normalise_phone(signals.get("site_phone") or signals.get("schema_phone") or "")
+
         for candidate in items:
             if not isinstance(candidate, dict):
                 continue
@@ -603,6 +606,19 @@ class GBPAuditor:
                 )
             )
             if c_name_match:
+                # Phone cross-check: if both the website and this candidate
+                # have a phone number and they don't match, this is the wrong
+                # listing (e.g. a same-name business in a different city).
+                # Skip it and keep looking rather than pinning bad data.
+                c_phone = _normalise_phone(str(candidate.get("phone") or ""))
+                if own_phone and c_phone and own_phone != c_phone:
+                    log.info(
+                        "apify_maps: name match rejected — phone mismatch "
+                        "(site=%r apify=%r) title=%r",
+                        own_phone, c_phone, c_title,
+                    )
+                    rejected.append(f"{c_title!r}/{c_domain or '—'} [phone_mismatch]")
+                    continue
                 place         = candidate
                 title         = c_title
                 place_website = c_website
