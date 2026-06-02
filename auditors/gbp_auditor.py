@@ -584,48 +584,53 @@ class GBPAuditor:
         # Phone from website scrape (already populated by Tier 1 before we get here)
         own_phone = _normalise_phone(signals.get("site_phone") or signals.get("schema_phone") or "")
 
+        # Two-pass matching: domain match takes priority over name match.
+        # Pass 1 scans ALL candidates for a domain match before accepting
+        # any name-only result — prevents a wrong same-name business in
+        # position 1 from blocking the correct listing in position 2-5.
+        # Pass 2 falls back to name+phone match only if no domain match found.
+        name_match_candidate: Optional[Dict] = None
+
         for candidate in items:
             if not isinstance(candidate, dict):
                 continue
-            c_title    = (candidate.get("title")   or "").lower().strip()
-            c_website  = (candidate.get("website") or "").lower().strip()
-            c_domain   = _domain(c_website).lower() if c_website else ""
-            c_website_match = bool(own_domain and c_domain and own_domain == c_domain)
-            if c_website_match:
+            c_title   = (candidate.get("title")   or "").lower().strip()
+            c_website = (candidate.get("website") or "").lower().strip()
+            c_domain  = _domain(c_website).lower() if c_website else ""
+            if own_domain and c_domain and own_domain == c_domain:
                 place         = candidate
                 title         = c_title
                 place_website = c_website
                 place_domain  = c_domain
                 accept_reason = "website_match"
                 break
-            c_title_stripped = _LEGAL.sub("", c_title).strip()
-            c_name_match = bool(
-                c_title and nm and (
-                    nm_stripped in c_title_stripped or
-                    c_title_stripped in nm_stripped
-                )
-            )
-            if c_name_match:
-                # Phone cross-check: if both the website and this candidate
-                # have a phone number and they don't match, this is the wrong
-                # listing (e.g. a same-name business in a different city).
-                # Skip it and keep looking rather than pinning bad data.
-                c_phone = _normalise_phone(str(candidate.get("phone") or ""))
-                if own_phone and c_phone and own_phone != c_phone:
-                    log.info(
-                        "apify_maps: name match rejected — phone mismatch "
-                        "(site=%r apify=%r) title=%r",
-                        own_phone, c_phone, c_title,
-                    )
-                    rejected.append(f"{c_title!r}/{c_domain or '—'} [phone_mismatch]")
-                    continue
-                place         = candidate
-                title         = c_title
-                place_website = c_website
-                place_domain  = c_domain
-                accept_reason = "name_match"
-                break
-            rejected.append(f"{c_title!r}/{c_domain or '—'}")
+            # Stash the first viable name match as fallback (phone-checked below)
+            if name_match_candidate is None:
+                c_title_stripped = _LEGAL.sub("", c_title).strip()
+                if c_title and nm and (
+                    nm_stripped in c_title_stripped or c_title_stripped in nm_stripped
+                ):
+                    c_phone = _normalise_phone(str(candidate.get("phone") or ""))
+                    if own_phone and c_phone and own_phone != c_phone:
+                        log.info(
+                            "apify_maps: name match stash rejected — phone mismatch "
+                            "(site=%r apify=%r) title=%r",
+                            own_phone, c_phone, c_title,
+                        )
+                        rejected.append(f"{c_title!r}/{c_domain or '—'} [phone_mismatch]")
+                    else:
+                        name_match_candidate = candidate
+
+        # Accept the stashed name match only if Pass 1 found no domain match
+        if place is None and name_match_candidate is not None:
+            c_title   = (name_match_candidate.get("title")   or "").lower().strip()
+            c_website = (name_match_candidate.get("website") or "").lower().strip()
+            c_domain  = _domain(c_website).lower() if c_website else ""
+            place         = name_match_candidate
+            title         = c_title
+            place_website = c_website
+            place_domain  = c_domain
+            accept_reason = "name_match"
 
         if place is None:
             log.info(
@@ -691,7 +696,8 @@ class GBPAuditor:
                 signals["maps_link_url"] = str(place["url"])
             signals["maps_html_confirmed"] = True
 
-        signals["data_source_apify_maps"] = True
+        signals["data_source_apify_maps"]    = True
+        signals["apify_match_type"]          = accept_reason  # "website_match" or "name_match"
 
     # ── Score builder ──────────────────────────────────────────
 
@@ -788,6 +794,7 @@ class GBPAuditor:
             "last_post_date":     None,
             "post_note":          "GBP posts require Google My Business API (OAuth2).",
             "place_id":           s.get("place_id", ""),
+            "apify_match_type":   s.get("apify_match_type", ""),
             "completeness_pct":   completeness_pct,
             "nap_consistent":     s["nap_consistent"],
             "site_phone":         s["site_phone"],
@@ -897,6 +904,17 @@ class GBPAuditor:
                 "ensure your phone number is identical on your website, GBP, and all directories."
             )
 
+        # GBP listing confidence — flag when we matched by name only (no domain confirmation).
+        # This means the GBP listing may not have the website URL filled in, which hurts
+        # local SEO and makes review/rating data less reliable across audits.
+        if s.get("apify_match_type") == "name_match":
+            issues.append(
+                "🟡 Your Google Business Profile listing was matched by name only — your website URL "
+                "may not be set in your GBP profile. Log into business.google.com, go to Edit Profile "
+                "→ Contact, and add your website URL. This improves local SEO and ensures audit data "
+                "stays accurate across reports."
+            )
+
         return issues, strengths
 
     # ── Neutral fallback ───────────────────────────────────────
@@ -985,6 +1003,7 @@ def upgrade_with_pages(
         "review_count_verified": gbp_result.get("review_count_verified", True),
         "review_count_method":   gbp_result.get("review_count_method", "none"),
         "nap_consistent":      gbp_result.get("nap_consistent", False),
+        "apify_match_type":    gbp_result.get("apify_match_type", ""),
     }
 
     # Walk every page — text, external_links, iframe_srcs, structured_data
