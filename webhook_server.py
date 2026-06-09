@@ -1909,7 +1909,8 @@ def _run_client_audit(config: ClientConfig, rl: RateLimiter,
 
     ai            = audit_data.get("ai_insights", {})
     overall_score = ai.get("overall_score")
-    overall_grade = ai.get("overall_grade", "")
+    from config import grade as _grade_fn
+    overall_grade = _grade_fn(int(overall_score)) if overall_score is not None else ""
     log.info("CASH score: C=%s A=%s S=%s H=%s  Overall=%s (%s)",
              ai.get("cash_c_score","—"), ai.get("cash_a_score","—"),
              ai.get("cash_s_score","—"), ai.get("cash_h_score","—"),
