@@ -2242,6 +2242,36 @@ def _visitor_ip(req) -> str:
     return (req.remote_addr or "").strip() or "0.0.0.0"
 
 
+def _looks_like_bot_submission(business_name: str, website_url: str) -> tuple:
+    """
+    Cheap pre-audit gate for obvious bot/spam form submissions.
+
+    Signals (any one triggers reject):
+      1. website_url domain has no dot (no TLD) — e.g. 'https://GdITqUQFPVomtVutDSpmY'
+      2. business_name is high-entropy random alpha with no whitespace
+         (>=14 chars, >=5 upper/lower case transitions) — e.g. 'EEtyFAwCWcLgzjMehk'
+
+    Returns (is_bot, reason_tag). reason_tag is a short grep marker used
+    in abuse-signal log lines (empty when is_bot is False).
+    """
+    domain = re.sub(r"https?://", "", website_url or "").split("/")[0]
+    if domain and "." not in domain:
+        return True, "url_no_tld"
+
+    name = (business_name or "").strip()
+    if name and " " not in name and len(name) >= 14 and name.isalpha():
+        flips = sum(
+            1 for a, b in zip(name, name[1:])
+            if a.isupper() != b.isupper()
+        )
+        # Threshold 6: real 3-word CamelCase (e.g. "MyLittleCompany") tops
+        # out at 5 flips. Random bot strings ("EEtyFAwCWcLgzjMehk") hit 9+.
+        if flips >= 6:
+            return True, "name_high_entropy"
+
+    return False, ""
+
+
 def _log_abuse_signal(signal_type: str, **fields):
     """
     Structured log for abuse-pattern grep (per Dave 2026-05-07 Phase-1).
@@ -2428,6 +2458,27 @@ def cash_report():
 
     log.info("Wix form submission — email=%s  business=%r",
              parsed["contact_email"], parsed["business_name"])
+
+    # Anti-spam gate (per Dave 2026-07-13): silently drop obvious bot
+    # submissions — random-alphanumeric business names + no-TLD URLs
+    # were consuming Apify + email spend and burning sender reputation
+    # on gmail-dot-obfuscated addresses. Return a generic 202 so the bot
+    # gets no feedback that we detected it; no audit thread, no client
+    # email, no rate-limiter write.
+    is_bot, bot_reason = _looks_like_bot_submission(
+        parsed["business_name"], parsed["website_url"]
+    )
+    if is_bot:
+        _log_abuse_signal(
+            "garbage_input",
+            endpoint  = "/cash-report",
+            ip        = _visitor_ip(request),
+            email     = parsed["contact_email"],
+            business  = parsed["business_name"][:40],
+            url       = parsed["website_url"][:80],
+            reason    = bot_reason,
+        )
+        return _add_cors(jsonify({"success": True, "message": "Report request received"})), 202
 
     try:
         config = build_config_from_parsed(parsed)
