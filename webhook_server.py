@@ -65,11 +65,13 @@ import json
 import logging
 import os
 import re
+import socket
 import sys
 import threading
 import time
 import traceback
 from datetime import datetime
+from urllib.parse import urlparse
 
 import requests  # admin notification SendGrid call (line ~1337)
 
@@ -2272,6 +2274,81 @@ def _looks_like_bot_submission(business_name: str, website_url: str) -> tuple:
     return False, ""
 
 
+_RESERVED_FAKE_HOSTS = {
+    "localhost",
+    "localhost.localdomain",
+}
+_RESERVED_FAKE_SUFFIXES = (
+    ".example",
+    ".invalid",
+    ".localhost",
+    ".local",
+    ".test",
+)
+_PRECHECK_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (compatible; CASHReportPrecheck/1.0; +https://goguerrilla.xyz)"
+    )
+}
+
+
+def _soft_verify_website(url: str) -> tuple:
+    """
+    Lightweight reality check for the submitted website.
+
+    Goal: stop obviously fake domains before they fan out into Apify,
+    Google lookups, competitor audits, and hold emails.
+
+    Accept any fast HTTP response below 500 (2xx/3xx/4xx all prove the
+    domain is real enough to audit). Many legitimate sites block HEAD or
+    bot-like requests with 401/403/405, so those still count as real.
+
+    Returns (is_real, reason_tag).
+    """
+    norm_url = _normalise_url(url or "")
+    if not norm_url:
+        return False, "missing_url"
+
+    try:
+        parsed = urlparse(norm_url)
+    except Exception:
+        return False, "bad_url"
+
+    host = (parsed.hostname or "").strip().lower()
+    if not host or "." not in host:
+        return False, "url_no_tld"
+    if host in _RESERVED_FAKE_HOSTS or any(host.endswith(sfx) for sfx in _RESERVED_FAKE_SUFFIXES):
+        return False, "reserved_host"
+
+    try:
+        socket.getaddrinfo(host, parsed.port or 443, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        return False, "dns_unresolved"
+    except Exception:
+        return False, "dns_error"
+
+    for method in ("HEAD", "GET"):
+        try:
+            resp = requests.request(
+                method,
+                norm_url,
+                headers=_PRECHECK_HEADERS,
+                timeout=(3.5, 5.0),
+                allow_redirects=True,
+                stream=True,
+            )
+            status = int(resp.status_code or 0)
+            resp.close()
+            if 200 <= status < 500:
+                return True, ""
+        except requests.RequestException:
+            continue
+        except Exception:
+            continue
+
+    return False, "site_unreachable"
+
+
 def _log_abuse_signal(signal_type: str, **fields):
     """
     Structured log for abuse-pattern grep (per Dave 2026-05-07 Phase-1).
@@ -2477,6 +2554,19 @@ def cash_report():
             business  = parsed["business_name"][:40],
             url       = parsed["website_url"][:80],
             reason    = bot_reason,
+        )
+        return _add_cors(jsonify({"success": True, "message": "Report request received"})), 202
+
+    is_real_site, site_reason = _soft_verify_website(parsed["website_url"])
+    if not is_real_site:
+        _log_abuse_signal(
+            "website_precheck_failed",
+            endpoint  = "/cash-report",
+            ip        = _visitor_ip(request),
+            email     = parsed["contact_email"],
+            business  = parsed["business_name"][:40],
+            url       = parsed["website_url"][:80],
+            reason    = site_reason,
         )
         return _add_cors(jsonify({"success": True, "message": "Report request received"})), 202
 
